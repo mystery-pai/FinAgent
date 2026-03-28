@@ -1,127 +1,291 @@
-这份方案旨在帮助你构建一个基于 **RAG (Retrieval-Augmented Generation)** 架构的智能金融问答系统。由于要求使用本地开源模型并提供容器化环境，我们将采用 **LangChain/LlamaIndex + ChromaDB + Ollama (或 HuggingFace Transformers)** 的技术栈。
+# 📊 Fin-Agent - AAPL 10-K 智能问答系统
+
+> 基于 RAG 架构的 Apple 10-K 财报智能分析系统
+
+## 🎯 项目简介
+
+Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系统。通过混合检索（BM25 + 向量搜索）和大语言模型，系统能够准确回答关于 Apple 财务状况、风险因素、业务表现等各类问题，并提供可追溯的引用来源。
+
+### 解决的问题
+
+- **10-K 报告难懂**：动辄数百页的财报，信息密度高，难以快速定位关键信息
+- **数据追溯困难**：传统搜索无法关联不同年份的数据变化
+- **专业门槛高**：财务术语和表格需要专业知识才能理解
+
+### 系统特点
+
+- ✅ **混合检索**：结合 BM25 关键词匹配和向量语义搜索
+- ✅ **可追溯引用**：每个答案都标注来源（年份 + Section）
+- ✅ **跨年分析**：支持对比不同年份的数据变化
+- ✅ **本地部署**：所有组件均可本地运行，无需云服务
+- ✅ **容器化**：Docker 一键部署开箱即用
 
 ---
 
-### 项目方案名称：FinAgent 10-K 智能财报分析系统
+## 🏗️ 技术架构
+
+### 系统架构图
+
+```
+用户问题
+    ↓
+[Query Parser] → 提取年份/主题/问题类型
+    ↓
+[Hybrid Retriever]
+    ├─ BM25 Retriever (关键词精确匹配)
+    └─ Chroma Retriever (向量语义搜索)
+    ↓
+[RRF Fusion] → 合并去重 → 规则重排序
+    ↓
+[Answer Generator] → LLM 生成答案
+    ↓
+[Streamlit UI] → 展示答案 + 引用 + 调试信息
+```
+
+### 技术栈
+
+| 组件 | 技术选型 | 说明 |
+|------|----------|------|
+| **向量存储** | ChromaDB | 轻量级本地向量数据库 |
+| **Embedding** | bge-small-en-v1.5 | 英文金融文本语义编码 |
+| **关键词检索** | bm25s | BM25 算法实现 |
+| **结果融合** | RRF | Reciprocal Rank Fusion |
+| **LLM** | DeepSeek API / Ollama | 支持云端和本地模型 |
+| **前端** | Streamlit | 快速构建交互界面 |
+| **容器化** | Docker + docker-compose | 一键部署 |
+
+### 核心模块
+
+1. **Ingest Layer（数据摄取）**
+   - 解析 aapl_10k.json，标准化文档格式
+   - Section-Aware 智能分块，保持上下文完整性
+
+2. **Index Layer（索引层）**
+   - BM25 倒排索引：支持年份、专有名词精确匹配
+   - Chroma 向量索引：支持语义相似度搜索
+
+3. **Retrieve Layer（检索层）**
+   - Query Parser：提取查询约束（年份、主题）
+   - Hybrid Retriever：并行检索 + RRF 融合
+   - 规则重排序：根据问题类型调整权重
+
+4. **Generate Layer（生成层）**
+   - Prompt Engineering：约束模型基于证据回答
+   - 引用生成：标注每个事实的来源
 
 ---
 
-### 1. 核心技术选型
-*   **语言**: Python 3.10+
-*   **前端 UI**: Streamlit (快速构建交互式金融看板)
-*   **向量数据库**: ChromaDB (轻量级、本地运行)
-*   **嵌入模型 (Embedding)**: `BAAI/bge-small-en-v1.5` (开源、金融文本表现优异、轻量)
-*   **大语言模型 (LLM)**: `Llama-3.1-8B-Instruct` 或 `Qwen2.5-7B-Instruct` (本地运行，建议通过 Ollama 暴露 API)
-*   **RAG 框架**: LlamaIndex (在处理结构化文档和金融表格方面比 LangChain 更具针对性)
+## 🚀 快速开始
 
----
+### 方式一：Docker 部署（推荐）
 
-工程结构
-fin-agent/
-├── app/
-│   ├── api/
-│   ├── core/
-│   ├── ingest/
-│   ├── index/
-│   ├── retrieve/
-│   ├── generate/
-│   └── schemas/
-├── data/
-│   ├── raw/
-│   └── processed/
-├── scripts/
-│   ├── build_index.py
-│   └── eval_sample.py
-├── tests/
-├── Dockerfile
-├── docker-compose.yml
-├── README.md
-└── project.md
+```bash
+# 1. 克隆项目
+git clone <repo-url>
+cd fin-agent
 
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，设置 DEEPSEEK_API_KEY
 
-### 2. 核心模块设计
+# 3. 构建索引
+docker-compose run app python3 scripts/build_index.py
 
-#### 模块 A：数据预处理与结构化分块 (Ingestion)
-10-K 文件的难点在于**表格与文本混排**。
-*   **分层索引策略**: 按照 `file_fiscal_year` -> `section_title` -> `chunk` 进行索引。
-*   **文本清洗**: 去除无效的转义字符，识别并保留 Item 8 中的数值表格（建议将 ASCII 表格转换为 Markdown 格式以增强 LLM 理解力）。
-*   **语义分块**: 使用 `RecursiveCharacterTextSplitter`，块大小建议 512-1024 token，重叠 10%。
+# 4. 启动服务
+docker-compose up -d
 
-#### 模块 B：混合检索系统 (Hybrid Search)
-金融问答需要极高的准确性，单纯的语义搜索（Vector）可能找不到精确的财务数值。
-*   **向量搜索**: 处理“公司的竞争风险有哪些？”等语义问题。
-*   **关键字搜索 (BM25)**: 处理“2025年的 Net sales 是多少？”等包含特定专有名词的问题。
-*   **重排序 (Rerank)**: 使用 `bge-reranker-base` 对检索到的前 10 个片段进行精排，选出前 3 个。
+# 5. 访问 UI
+open http://localhost:8501
+```
 
-#### 模块 C：金融增强生成 (Generation)
-*   **Prompt Engineering**: 设定系统角色为“资深金融分析师”。强制要求模型：*“如果检索到的内容中没有数据，请回答不知道，不要编造数字”*。
-*   **多维比较查询**: 实现一个专门的逻辑来处理跨年度比较（例如：对比 2024 和 2025 的营收增长）。
+### 方式二：本地运行
 
----
+```bash
+# 1. 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-### 3. README.md 结构建议
+# 2. 安装依赖
+pip install -r requirements.txt
 
-一份专业的 README 是加分项，应包含：
-1.  **项目简介**: 解决 10-K 报告长、难、数值密集的痛点。
-2.  **快速启动指南**: 
-    *   `docker-compose up -d`
-    *   访问 `localhost:8501`。
-3.  **技术亮点**:
-    *   **跨年度对比能力**: 如何通过 Metadata Filter 实现指定年份的查询。
-    *   **表格感知检索**: 针对 Item 8 的处理方案。
-4.  **评估指南 (Eval)**:
-    *   如何评估回答的准确性（如使用 RAGAS 框架计算忠实度 Faithfulness）。
-5.  **AI 协作说明**: 说明哪些代码模块是辅助生成的，你如何进行重构和逻辑校验。
+# 3. 下载 NLTK 数据
+python3 -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 
----
+# 4. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件
 
-### 4. 容器化配置 (docker-compose.yml 示例)
+# 5. 构建索引
+python3 scripts/build_index.py
 
-```yaml
-services:
-  # LLM 推理引擎
-  ollama:
-    image: ollama/ollama
-    volumes:
-      - ./ollama_data:/root/.ollama
-    ports:
-      - "11434:11434"
-
-  # 主应用
-  app:
-    build: .
-    ports:
-      - "8501:8501"
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-    depends_on:
-      - ollama
-    volumes:
-      - ./data:/app/data
+# 6. 启动 UI
+streamlit run ui/streamlit_app.py
 ```
 
 ---
 
-### 5. 实现阶段拆解 (Git 提交建议)
+## 📖 使用指南
 
-为了展示良好的开发习惯，建议 Git 提交历史如下：
-1.  `feat: project initialized and docker config`
-2.  `feat: parser for aapl_10k.json to extract text and tables`
-3.  `feat: implement vector storage with ChromaDB and BGE embeddings`
-4.  `feat: develop hybrid retrieval logic (BM25 + Vector)`
-5.  `feat: add financial analysis prompt template and LLM chain`
-6.  `feat: streamlit dashboard for Q&A and visualization`
-7.  `refactor: optimize chunking strategy for Item 8 tables`
-8.  `docs: complete README and evaluation guide`
+### 示例问题
+
+**单点事实查询**
+```
+What were Apple's main risks in 2025?
+How much did Apple invest in R&D in 2024?
+```
+
+**跨年对比分析**
+```
+How did Apple's revenue change from 2023 to 2025?
+Compare the risk factors between 2024 and 2025
+```
+
+**总结报告**
+```
+Summarize Apple's business overview
+What is Apple's overall financial condition in 2025?
+```
+
+### UI 功能
+
+- **Top K 设置**：调整检索结果数量（3-10）
+- **年份过滤**：限定查询特定年份数据
+- **混合检索开关**：选择是否启用 BM25 + 向量融合
+- **调试信息**：查看检索过程和评分详情
 
 ---
 
-### 6. 针对样例数据的特别处理建议
+## 📁 项目结构
 
-观察你提供的数据：
-*   **Item 8 包含大量数值**: 如 `Net income 112,010`。在预处理时，将这些 JSON 里的表格行提取出来，并打上 `year: 2025`, `type: income_statement` 的标签（Metadata）。
-*   **跨年问答**: 如果用户问“Apple近三年的净利润趋势”，你的系统应能触发 `Metadata-driven retrieval`，搜集 2023-2025 的 Item 8 数据，交由 LLM 总结。
+```
+fin-agent/
+├── app/
+│   ├── api/                # FastAPI 路由（可选）
+│   ├── core/               # 配置管理
+│   ├── ingest/             # 数据解析和分块
+│   │   ├── parser.py       # JSON 解析
+│   │   └── chunker.py      # 文本分块
+│   ├── retrieve/           # 检索层
+│   │   ├── bm25_retriever.py
+│   │   ├── chroma_retriever.py
+│   │   └── hybrid_retriever.py
+│   ├── generate/           # 生成层
+│   │   └── answer_generator.py
+│   └── schemas/            # 数据模型
+├── data/
+│   ├── raw/                # 原始数据
+│   │   └── aapl_10k.json
+│   └── processed/          # 处理后的数据
+│       └── chunks.json
+├── ui/
+│   └── streamlit_app.py    # Streamlit 界面
+├── scripts/
+│   ├── setup.py            # 初始化脚本
+│   └── build_index.py      # 构建索引
+├── indexes/                # 搜索索引
+│   ├── bm25_index/
+│   └── chroma/
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+└── README.md
+```
 
-### 7. 避坑指南
-*   **内存管理**: 本地运行 Llama 3.1 需要至少 8GB 显存或 16GB 内存。如果在 CPU 运行，务必使用 **Quantized (量化版)** 模型（如 GGUF 格式）。
-*   **解析效率**: 不要一次性把所有文本塞给 LLM，10-K 片段很长， context window 溢出会导致报错或遗忘。
+---
+
+## 🔧 配置说明
+
+### 环境变量 (.env)
+
+```bash
+# LLM 配置
+LLM_PROVIDER=deepseek  # 或 ollama
+DEEPSEEK_API_KEY=your_api_key_here
+
+# Embedding 配置
+EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+EMBEDDING_DEVICE=cpu  # 或 cuda/mps
+
+# 检索配置
+BM25_TOP_K=10
+VECTOR_TOP_K=10
+FINAL_TOP_K=5
+CHUNK_SIZE=512
+CHUNK_OVERLAP=50
+```
+
+---
+
+## 🧪 评估指南
+
+### 评估维度
+
+1. **检索质量**
+   - Hit@K：相关文档是否在 Top K 结果中
+   - MRR：平均倒数排名
+
+2. **答案质量**
+   - Faithfulness：答案是否基于检索到的证据
+   - Citation Accuracy：引用是否准确
+
+3. **端到端评估**
+   - 使用预设测试集（见 `tests/eval_questions.json`）
+   - 对比系统答案与参考答案
+
+### 运行评估
+
+```bash
+python3 scripts/eval.py
+```
+
+---
+
+## 🤖 AI 协作说明
+
+本项目使用 Claude Code 辅助开发，主要协作内容：
+
+- **架构设计**： brainstorming skill 讨论系统设计
+- **代码框架**：基础模块骨架生成
+- **文档编写**：README 和设计文档初稿
+
+人工完成：
+- **逻辑验证**：每个模块的业务逻辑校验
+- **代码重构**：优化代码结构和性能
+- **测试验证**：功能测试和边界情况处理
+
+---
+
+## 🐛 常见问题
+
+**Q: 检索结果不准确怎么办？**
+A: 尝试调整 Top K 参数，或关闭混合检索只使用 BM25（适合精确查询）
+
+**Q: LLM 回答包含错误信息？**
+A: 检查上下文是否相关，可以调整 Prompt 模板（见 `app/generate/prompter.py`）
+
+**Q: Docker 构建很慢？**
+A: 第一次构建需要下载 embedding 模型，后续启动会快很多
+
+---
+
+## 📈 开发路线
+
+- [ ] 支持 SEC 文件在线下载
+- [ ] 添加更多公司（不仅 AAPL）
+- [ ] 支持中文问题
+- [ ] 图表可视化（营收趋势、风险变化等）
+- [ ] 多轮对话功能
+
+---
+
+## 📄 许可证
+
+MIT License
+
+---
+
+## 🙏 致谢
+
+- 数据来源：U.S. Securities and Exchange Commission (SEC)
+- Embedding 模型：BAAI/bge-small-en-v1.5
+- 检索算法：bm25s, ChromaDB

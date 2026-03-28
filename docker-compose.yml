@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Main application
+  app:
+    build: .
+    container_name: fin-agent-app
+    ports:
+      - "8501:8501"
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cpu}
+    volumes:
+      - ./data:/app/data
+      - ./indexes:/app/indexes
+      - ./embeddings:/app/embeddings
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Ollama for local LLM
+  # Uncomment if you want to use Ollama instead of DeepSeek API
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: fin-agent-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   restart: unless-stopped
+  #   # Pull model on start
+  #   entrypoint: ["sh", "-c", "ollama serve & sleep 5 && ollama pull deepseek-coder:33b && tail -f /dev/null"]
+
+volumes:
+  ollama_data:
+    driver: local

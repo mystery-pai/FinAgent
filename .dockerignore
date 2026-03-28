@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Data (will be mounted as volumes)
+data/processed/*
+!data/processed/.gitkeep
+
+# Indexes (will be mounted as volumes)
+indexes/*
+!indexes/.gitkeep
+
+# Embeddings (will be mounted as volumes)
+embeddings/*
+!embeddings/.gitkeep
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Streamlit
+.streamlit/
+
+# Claude
+.claude/
+.codex/
+migration.bin
+conversation.txt
+project.md

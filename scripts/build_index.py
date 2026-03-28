@@ -1,64 +1,86 @@
 #!/usr/bin/env python3
 """
-Build search indexes from 10-K data
+Script to build search indices from source data.
+运行此脚本来构建搜索索引
 """
 import sys
+import logging
 from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from loguru import logger
-from app.ingest.parser import TenKParser
-from app.ingest.chunker import SectionAwareChunker
-from app.retrieve.chroma_retriever import ChromaRetriever
+from app.ingest.preprocessor import FinancialDataProcessor
 from app.retrieve.bm25_retriever import BM25Retriever
+from app.retrieve.chroma_retriever import ChromaRetriever
+from app.core.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 def main():
-    """Build all indexes"""
-    logger.info("🏗️  Building search indexes...")
+    """Main function to build indices"""
+    logger.info("=" * 60)
+    logger.info("Building search indices for AAPL 10-K reports")
+    logger.info("=" * 60)
 
-    # Step 1: Parse documents
-    logger.info("\n[1/4] Parsing documents...")
-    parser = TenKParser("data/raw/aapl_10k.json")
-    documents = parser.run()
-    logger.info(f"✅ Parsed {len(documents)} documents")
+    # Step 1: Load and preprocess data
+    logger.info("\n[Step 1/3] Loading and preprocessing data...")
+    processor = FinancialDataProcessor()
 
-    # Step 2: Chunk documents
-    logger.info("\n[2/4] Chunking documents...")
-    chunker = SectionAwareChunker(
-        chunk_size=512,
-        chunk_overlap=50
-    )
-    chunks = chunker.chunk_documents(documents)
-    chunker.save_chunks(chunks, "data/processed/chunks.json")
-    logger.info(f"✅ Created {len(chunks)} chunks")
+    try:
+        chunks = processor.process_file()
+        logger.info(f"Processed {len(chunks)} chunks from source data")
+    except FileNotFoundError:
+        logger.error(f"Data file not found: {settings.raw_data_path}")
+        logger.error("Please ensure aapl_10k.json is in the data/raw/ directory")
+        return 1
+    except Exception as e:
+        logger.error(f"Error processing data: {e}")
+        return 1
 
-    # Step 3: Build BM25 index
-    logger.info("\n[3/4] Building BM25 index...")
+    # Step 2: Build BM25 index
+    logger.info("\n[Step 2/3] Building BM25 index...")
     bm25_retriever = BM25Retriever()
-    bm25_retriever.build_index(chunks)
-    bm25_retriever.save("indexes/bm25_index")
-    logger.info(f"✅ BM25 index built")
 
-    # Step 4: Build Chroma index
-    logger.info("\n[4/4] Building Chroma index...")
-    chroma_retriever = ChromaRetriever(
-        collection_name="aapl_10k",
-        persist_directory="indexes/chroma"
-    )
-    chroma_retriever.build_index(chunks)
-    logger.info(f"✅ Chroma index built")
+    try:
+        bm25_retriever.build_index(chunks)
+        logger.info(f"BM25 index built with {len(chunks)} documents")
+    except Exception as e:
+        logger.error(f"Error building BM25 index: {e}")
+        return 1
 
-    logger.info("\n" + "="*60)
-    logger.info("✅ All indexes built successfully!")
-    logger.info("="*60)
-    logger.info(f"\nIndex locations:")
-    logger.info(f"  - BM25: indexes/bm25_index")
-    logger.info(f"  - Chroma: indexes/chroma")
-    logger.info(f"  - Chunks: data/processed/chunks.json")
+    # Step 3: Build ChromaDB index
+    logger.info("\n[Step 3/3] Building ChromaDB vector index...")
+    chroma_retriever = ChromaRetriever()
+
+    try:
+        # Clear existing collection if any
+        chroma_retriever.delete_collection()
+        # Build new index
+        chroma_retriever.build_index(chunks)
+        stats = chroma_retriever.get_collection_stats()
+        logger.info(f"ChromaDB index built with {stats['count']} documents")
+    except Exception as e:
+        logger.error(f"Error building ChromaDB index: {e}")
+        return 1
+
+    logger.info("\n" + "=" * 60)
+    logger.info("Index building completed successfully!")
+    logger.info("=" * 60)
+    logger.info("\nYou can now run the API server:")
+    logger.info("  python -m app.api.main")
+    logger.info("\nOr the Streamlit UI:")
+    logger.info("  streamlit run app/ui/streamlit_app.py")
+    logger.info("")
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
