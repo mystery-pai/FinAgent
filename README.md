@@ -86,8 +86,8 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 
 ```bash
 # 1. 克隆项目
-git clone <repo-url>
-cd fin-agent
+git clone https://github.com/mystery-pai/FinAgent.git 
+cd FinAgent
 
 # 2. 配置环境变量
 cp .env.example .env
