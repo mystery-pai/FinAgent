@@ -156,59 +156,81 @@ class BM25Retriever:
 
         # Tokenize query
         query_tokens = self._tokenize(query)
+        if not query_tokens:
+            logger.warning("Empty tokenized query for BM25 retrieval")
+            return []
 
         # Get scores
         if BM25S_AVAILABLE and isinstance(self.bm25_index, bm25s.BM25):
-            # Use bm25s library
-            results, scores = self.bm25_index.retrieve(query_tokens, k=k * 2)  # Get more for filtering
+            # bm25s expects a batch of tokenized queries, even for a single query.
+            results, scores = self.bm25_index.retrieve([query_tokens], k=k * 2)
+            result_indices = self._to_result_row(results)
+            score_values = self._to_result_row(scores)
         else:
             # Use simple implementation
             scores = self._score_simple(query_tokens)
             # Get top indices
             sorted_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
-            results = [sorted_indices[:k * 2]]
-            scores = [scores[i] for i in sorted_indices[:k * 2]]
+            result_indices = sorted_indices[:k * 2]
+            score_values = [scores[i] for i in result_indices]
 
         # Convert to RetrievedDocument objects
         retrieved = []
         seen_doc_ids = set()
 
-        for result_set, score_list in zip(results, [scores] if not isinstance(scores, list) else [scores]):
-            for idx, score in zip(result_set, score_list):
-                if idx >= len(self.corpus):
+        for idx, score in zip(result_indices, score_values):
+            if idx >= len(self.corpus):
+                continue
+
+            doc_id = self.doc_ids[idx]
+            chunk_data = self.corpus[idx]
+            metadata = chunk_data["metadata"]
+
+            # Apply filters if provided
+            if filters:
+                if "year" in filters and metadata.get("year") != filters["year"]:
+                    continue
+                if "item_type" in filters and metadata.get("item_type") != filters["item_type"]:
                     continue
 
-                doc_id = self.doc_ids[idx]
-                chunk_data = self.corpus[idx]
-                metadata = chunk_data["metadata"]
+            # Deduplicate by doc_id
+            if doc_id in seen_doc_ids:
+                continue
+            seen_doc_ids.add(doc_id)
 
-                # Apply filters if provided
-                if filters:
-                    if "year" in filters and metadata.get("year") != filters["year"]:
-                        continue
-                    if "item_type" in filters and metadata.get("item_type") != filters["item_type"]:
-                        continue
-
-                # Deduplicate by doc_id
-                if doc_id in seen_doc_ids:
-                    continue
-                seen_doc_ids.add(doc_id)
-
-                retrieved.append(
-                    RetrievedDocument(
-                        doc_id=doc_id,
-                        text=chunk_data["text"],
-                        score=float(score),
-                        metadata=metadata,
-                        retrieval_method="bm25",
-                    )
+            retrieved.append(
+                RetrievedDocument(
+                    doc_id=doc_id,
+                    text=chunk_data["text"],
+                    score=float(score),
+                    metadata=metadata,
+                    retrieval_method="bm25",
                 )
+            )
 
-                if len(retrieved) >= k:
-                    break
+            if len(retrieved) >= k:
+                break
 
         logger.info(f"BM25 retrieved {len(retrieved)} documents for query: {query[:50]}...")
         return retrieved
+
+    def _to_result_row(self, values: Any) -> List[Any]:
+        """
+        Convert bm25s output to a flat result row for a single query.
+
+        Args:
+            values: bm25s result or score array
+
+        Returns:
+            Flat list for the first query
+        """
+        if hasattr(values, "tolist"):
+            values = values.tolist()
+
+        if isinstance(values, list) and values and isinstance(values[0], list):
+            return values[0]
+
+        return values if isinstance(values, list) else []
 
     def _score_simple(self, query_tokens: List[str]) -> List[float]:
         """

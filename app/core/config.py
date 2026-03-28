@@ -19,11 +19,15 @@ class Settings(BaseSettings):
     # Embedding settings
     embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
     embedding_device: str = Field(default="cpu")
+    collection_name: str = Field(default="financial_docs")
 
     # Retrieval settings
     bm25_top_k: int = Field(default=10)
     vector_top_k: int = Field(default=10)
     final_top_k: int = Field(default=5)
+    bm25_k: int = Field(default=10)
+    vector_k: int = Field(default=10)
+    hybrid_k: int = Field(default=5)
     chunk_size: int = Field(default=512)
     chunk_overlap: int = Field(default=50)
 
@@ -36,10 +40,11 @@ class Settings(BaseSettings):
     streamlit_port: int = Field(default=8501)
 
     # Paths
-    data_raw_path: str = Field(default="data/raw")
+    data_raw_path: str = Field(default="data/raw/aapl_10k.json")
     data_processed_path: str = Field(default="data/processed")
     indexes_path: str = Field(default="indexes")
     embeddings_path: str = Field(default="embeddings")
+    chroma_persist_dir: str = Field(default="data/chroma_db")
 
     class Config:
         env_file = ".env"

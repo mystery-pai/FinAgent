@@ -37,7 +37,7 @@ def main():
         chunks = processor.process_file()
         logger.info(f"Processed {len(chunks)} chunks from source data")
     except FileNotFoundError:
-        logger.error(f"Data file not found: {settings.raw_data_path}")
+        logger.error(f"Data file not found: {settings.data_raw_path}")
         logger.error("Please ensure aapl_10k.json is in the data/raw/ directory")
         return 1
     except Exception as e:

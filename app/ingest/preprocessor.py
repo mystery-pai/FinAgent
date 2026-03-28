@@ -345,7 +345,7 @@ class FinancialDataProcessor:
         Returns:
             List of section dictionaries
         """
-        file_path = file_path or settings.raw_data_path
+        file_path = file_path or settings.data_raw_path
 
         logger.info(f"Loading data from {file_path}")
 
@@ -383,7 +383,7 @@ class FinancialDataProcessor:
                 symbol = section.get("symbol", "AAPL")
                 year = int(section.get("file_fiscal_year", 0))
                 form_type = section.get("form_type", "10-K")
-                section_id = section.get("section_id", "")
+                section_id = str(section.get("section_id", ""))
                 section_title = section.get("section_title", "")
                 section_text = section.get("section_text", "")
 
@@ -431,7 +431,7 @@ class FinancialDataProcessor:
         chunks = self.process_sections(sections)
 
         # Save processed chunks
-        output_path = output_path or settings.processed_data_path
+        output_path = output_path or settings.data_processed_path
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 

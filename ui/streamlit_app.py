@@ -67,11 +67,7 @@ def load_system_components():
         from app.core.config import settings
 
         # Initialize retriever
-        retriever = HybridRetriever(
-            bm25_index_path="indexes/bm25_index",
-            chroma_collection_name="aapl_10k",
-            chroma_persist_dir="indexes/chroma"
-        )
+        retriever = HybridRetriever()
 
         # Initialize generator
         generator = AnswerGenerator()
@@ -139,12 +135,29 @@ def render_answer(answer: str, citations: list, debug_info: dict):
     if citations:
         st.markdown("### 📚 Citations")
         for i, citation in enumerate(citations, 1):
-            with st.expander(f"Citation {i}: {citation.get('year', 'N/A')} - {citation.get('section_title', 'N/A')}"):
-                st.markdown(f"**Chunk ID**: `{citation.get('chunk_id', 'N/A')}`")
-                st.markdown(f"**Score**: `{citation.get('score', 0):.4f}`")
-                st.markdown(f"**Item Type**: `{citation.get('item_type', 'N/A')}`")
-                st.markdown("**Snippet**:")
-                st.markdown(f"<div class='citation-box'>{citation.get('text', '')[:500]}...</div>", unsafe_allow_html=True)
+            # Handle both dict and Pydantic model
+            if hasattr(citation, 'model_dump'):
+                cit_data = citation.model_dump()
+            elif isinstance(citation, dict):
+                cit_data = citation
+            else:
+                cit_data = {}
+
+            year = cit_data.get('year', 'N/A')
+            section_title = cit_data.get('section_title', 'N/A')
+            chunk_id = cit_data.get('chunk_id', 'N/A')
+            score = cit_data.get('relevance_score', cit_data.get('score', 0))
+
+            with st.expander(f"Citation {i}: {year} - {section_title}"):
+                st.markdown(f"**Chunk ID**: `{chunk_id}`")
+                st.markdown(f"**Relevance Score**: `{score:.4f}`")
+                # Add item_type if available in metadata
+                if 'item_type' in cit_data:
+                    st.markdown(f"**Item Type**: `{cit_data['item_type']}`")
+                # Add text snippet if available
+                if 'text' in cit_data:
+                    st.markdown("**Snippet**:")
+                    st.markdown(f"<div class='citation-box'>{cit_data['text'][:500]}...</div>", unsafe_allow_html=True)
 
     # Debug info
     with st.expander("🔍 Retrieval Debug Info"):
@@ -186,15 +199,30 @@ def main():
     render_header()
     top_k, use_hybrid, year_filter, llm_provider = render_sidebar()
 
+    # Initialize example query in session state
+    if "example_query" not in st.session_state:
+        st.session_state.example_query = ""
+
     # Main query interface
     col1, col2 = st.columns([4, 1])
 
     with col1:
-        query = st.text_input(
-            "Ask a question about AAPL 10-K...",
-            placeholder="e.g., What were Apple's main risks in 2025?",
-            key="query_input"
-        )
+        # Use example query if set, otherwise use current input value
+        if st.session_state.example_query:
+            query = st.text_input(
+                "Ask a question about AAPL 10-K...",
+                value=st.session_state.example_query,
+                placeholder="e.g., What were Apple's main risks in 2025?",
+                key="query_input"
+            )
+            # Clear example query after using it
+            st.session_state.example_query = ""
+        else:
+            query = st.text_input(
+                "Ask a question about AAPL 10-K...",
+                placeholder="e.g., What were Apple's main risks in 2025?",
+                key="query_input"
+            )
 
     with col2:
         submitted = st.button("Search", type="primary", use_container_width=True)
@@ -205,26 +233,26 @@ def main():
 
         with example_col1:
             if st.button("2025 Risks", use_container_width=True):
-                st.session_state.query_input = "What were Apple's main risks in 2025?"
+                st.session_state.example_query = "What were Apple's main risks in 2025?"
                 st.rerun()
             if st.button("Revenue Trend", use_container_width=True):
-                st.session_state.query_input = "How did Apple's revenue change from 2023 to 2025?"
+                st.session_state.example_query = "How did Apple's revenue change from 2023 to 2025?"
                 st.rerun()
 
         with example_col2:
             if st.button("Business Overview", use_container_width=True):
-                st.session_state.query_input = "Summarize Apple's business overview"
+                st.session_state.example_query = "Summarize Apple's business overview"
                 st.rerun()
             if st.button("Financial Health", use_container_width=True):
-                st.session_state.query_input = "What is Apple's financial condition in 2025?"
+                st.session_state.example_query = "What is Apple's financial condition in 2025?"
                 st.rerun()
 
         with example_col3:
             if st.button("Legal Issues", use_container_width=True):
-                st.session_state.query_input = "What legal proceedings does Apple face?"
+                st.session_state.example_query = "What legal proceedings does Apple face?"
                 st.rerun()
             if st.button("R&D Investment", use_container_width=True):
-                st.session_state.query_input = "How much did Apple invest in R&D in 2024?"
+                st.session_state.example_query = "How much did Apple invest in R&D in 2024?"
                 st.rerun()
 
     # Process query
@@ -235,13 +263,18 @@ def main():
         # Show progress
         with st.spinner("Retrieving relevant information..."):
             try:
+                # Build filters
+                filters = {}
+                if year_filter:
+                    filters["year"] = year_filter
+
                 # Retrieve
-                results = st.session_state.retriever.retrieve(
+                retrieved_docs, debug_info = st.session_state.retriever.retrieve(
                     query=query,
-                    top_k=top_k,
-                    year_filter=year_filter,
-                    use_hybrid=use_hybrid
+                    k=top_k,
+                    filters=filters if filters else None
                 )
+                results = retrieved_docs
 
                 if not results:
                     st.warning("No relevant information found. Try rephrasing your query.")
@@ -249,23 +282,23 @@ def main():
 
                 # Generate answer
                 with st.spinner("Generating answer..."):
-                    response = st.session_state.generator.generate(
-                        query=query,
-                        context_chunks=results,
-                        llm_provider=llm_provider
+                    answer, citations = st.session_state.generator.generate(
+                        question=query,
+                        retrieved_docs=results,
+                        query_type=debug_info.get("query_type", "factual"),
+                        debug_info=debug_info
                     )
 
                     # Display results
                     render_answer(
-                        answer=response["answer"],
-                        citations=response["citations"],
+                        answer=answer,
+                        citations=citations,
                         debug_info={
                             "query": query,
                             "top_k": top_k,
-                            "use_hybrid": use_hybrid,
                             "year_filter": year_filter,
                             "retrieved_count": len(results),
-                            "retrieval_method": "hybrid" if use_hybrid else "bm25"
+                            **debug_info
                         }
                     )
 
