@@ -66,5 +66,5 @@ project.md
 htmlcov/
 
 # Embedded repos
-.claude/
-.codex/
+.claude/skills/superpowers
+.codex/skills/superpowers
