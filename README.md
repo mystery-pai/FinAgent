@@ -122,6 +122,78 @@ python3 scripts/build_index.py
 streamlit run ui/streamlit_app.py
 ```
 
+### 本地检索调试 CLI
+
+```bash
+# Hybrid retrieval
+./venv/bin/python scripts/debug_retrieve.py "appl cash flow"
+
+# BM25 only
+./venv/bin/python scripts/debug_retrieve.py "appl cash flow" --mode bm25 --top-k 10
+
+# Vector only with year filter
+./venv/bin/python scripts/debug_retrieve.py "cash flow" --mode vector --year 2024
+
+# JSON output for deeper debugging
+./venv/bin/python scripts/debug_retrieve.py "cash flow" --mode hybrid --json
+```
+
+说明：
+- `bm25` 模式不依赖 embedding 模型，最适合快速排查关键词召回。
+- `vector` / `hybrid` 模式需要本地可用的 embedding 模型缓存；如果当前环境要走代理下载模型，还需要 `httpx[socks]` 或 `socksio`。
+
+### 本地问答调试 CLI
+
+```bash
+# Default: mimic the API flow with configured translation + configured LLM
+./venv/bin/python scripts/debug_answer.py "apple cash flow" --mode hybrid --show-retrieved
+
+# Ask in Chinese and let the configured translator handle retrieval query conversion
+./venv/bin/python scripts/debug_answer.py "苹果现金流情况如何？" --mode hybrid --show-retrieved
+
+# Pure local fallback: retrieval + simple answer, no translation, no LLM
+./venv/bin/python scripts/debug_answer.py "apple cash flow" --mode hybrid --no-translate --no-llm --show-retrieved
+
+# JSON output for scripting
+./venv/bin/python scripts/debug_answer.py "apple cash flow" --mode bm25 --no-translate --no-llm --json
+```
+
+说明：
+- 默认行为尽量贴近 API：会使用配置里的翻译和回答模型。
+- `--no-translate --no-llm` 用于切回纯本地排障模式。
+- 脚本会优先复用当前环境里的 `http_proxy` / `https_proxy`，并避免 `all_proxy=socks5://...` 导致的初始化报错。
+
+### 表格类问题排障策略
+
+对于 `cash flow`、`balance sheet`、`income statement` 这类表格型问题，优先按下面顺序排查：
+
+1. 先看召回是否命中正确 section
+```bash
+./venv/bin/python scripts/debug_retrieve.py "Apple's cash flow for 2025" --mode hybrid --top-k 10
+```
+
+2. 再看问答上下文是否只拿到了表格的一部分
+```bash
+./venv/bin/python scripts/debug_answer.py "Apple's cash flow for 2025" --mode hybrid --no-translate --no-llm --show-retrieved
+```
+
+3. 检查当前分块参数
+- `CHUNK_SIZE=512`
+- `CHUNK_OVERLAP=50`
+
+注意：
+- `chunk_overlap` 目前只对普通文本分块生效。
+- 表格分块走 `app/ingest/preprocessor.py` 里的 `_split_table()`，默认没有 overlap。
+- 因此现金流量表可能会被切成多个独立 chunk，例如 operating / investing / financing / supplemental disclosure 分散到不同块。
+
+当前已实现的修复策略：
+- `hybrid` 已改为 chunk 级融合，不再按整个 section 融合。
+- 当 query 命中 `cash_flow` 且召回到 `Cash Flow Statement` 时，会自动扩展同一文档的邻接 chunk，把整张表的相邻块一并带入上下文。
+
+推荐原则：
+- 先保留当前 `chunk_size` / `chunk_overlap`，优先观察邻接 chunk 扩展是否已经解决“表格上下文不完整”。
+- 只有在邻接扩展仍不够时，再考虑调整表格分块策略，例如更大的表格 chunk 或保留表头的逻辑块切分。
+
 ---
 
 ## 📖 使用指南
