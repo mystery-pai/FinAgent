@@ -1,34 +1,45 @@
 """
-Configuration management for the financial RAG system.
-核心配置管理
+Configuration management using pydantic-settings
 """
 from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic import Field
+from typing import Literal
 
 
 class Settings(BaseSettings):
     """Application settings"""
 
-    # Model configurations
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
-    embedding_device: str = "cpu"  # or "cuda" if available
+    # LLM Configuration
+    llm_provider: Literal["deepseek", "ollama"] = Field(default="deepseek")
+    deepseek_api_key: str = Field(default="")
+    deepseek_base_url: str = Field(default="https://api.deepseek.com")
+    ollama_base_url: str = Field(default="http://localhost:11434")
+    ollama_model: str = Field(default="deepseek-coder:33b")
 
-    # Chunking settings
-    chunk_size: int = 512
-    chunk_overlap: int = 50
+    # Embedding settings
+    embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
+    embedding_device: str = Field(default="cpu")
 
     # Retrieval settings
-    bm25_k: int = 10  # BM25 top-k results
-    vector_k: int = 10  # Vector search top-k results
-    hybrid_k: int = 5  # Final top-k after fusion
+    bm25_top_k: int = Field(default=10)
+    vector_top_k: int = Field(default=10)
+    final_top_k: int = Field(default=5)
+    chunk_size: int = Field(default=512)
+    chunk_overlap: int = Field(default=50)
 
-    # ChromaDB settings
-    chroma_persist_dir: str = "./data/chroma_db"
-    collection_name: str = "financial_reports"
+    # API settings
+    api_host: str = Field(default="0.0.0.0")
+    api_port: int = Field(default=8000)
 
-    # Data paths
-    raw_data_path: str = "./data/raw/aapl_10k.json"
-    processed_data_path: str = "./data/processed"
+    # Streamlit settings
+    streamlit_host: str = Field(default="0.0.0.0")
+    streamlit_port: int = Field(default=8501)
+
+    # Paths
+    data_raw_path: str = Field(default="data/raw")
+    data_processed_path: str = Field(default="data/processed")
+    indexes_path: str = Field(default="indexes")
+    embeddings_path: str = Field(default="embeddings")
 
     class Config:
         env_file = ".env"
