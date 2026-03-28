@@ -1,0 +1,301 @@
+"""
+Answer generation using LLM with retrieved context.
+基于检索上下文的LLM答案生成
+"""
+import logging
+from typing import List, Dict, Any, Optional
+from openai import OpenAI
+
+from app.schemas.models import RetrievedDocument, Citation
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class PromptTemplate:
+    """Prompt templates for different question types"""
+
+    SYSTEM_TEMPLATE = """You are a senior financial analyst specializing in analyzing 10-K reports. Your task is to answer questions based on the retrieved document fragments.
+
+**IMPORTANT RULES:**
+1. ONLY use information from the provided context fragments
+2. If the context doesn't contain enough information, explicitly state "Insufficient information"
+3. NEVER make up numbers or facts
+4. Always cite your sources with year and section
+5. For comparative questions, organize your answer by year
+6. Keep answers concise but comprehensive
+
+**Answer Format:**
+结论：[Your conclusion in Chinese]
+依据：
+- [Year], [Section Title]: [Brief relevant content]
+补充说明：[Additional context if needed]
+"""
+
+    FACTUAL_TEMPLATE = """Based on the following 10-K report fragments, answer the question.
+
+**Question:** {question}
+
+**Context Fragments:**
+{context}
+
+**Requirements:**
+- Provide a direct answer in Chinese
+- List each source citation
+- If information is insufficient, state it clearly
+
+**Answer:**"""
+
+    COMPARATIVE_TEMPLATE = """Based on the following 10-K report fragments, provide a comparative analysis.
+
+**Question:** {question}
+
+**Context Fragments:**
+{context}
+
+**Requirements:**
+- Compare information across different years
+- Organize by year chronologically
+- Highlight trends and changes
+- Provide source citations for each year
+
+**Answer:**"""
+
+    SUMMARY_TEMPLATE = """Based on the following 10-K report fragments, provide a comprehensive summary.
+
+**Topic:** {question}
+
+**Context Fragments:**
+{context}
+
+**Requirements:**
+- Synthesize information from multiple sources
+- Cover key aspects comprehensively
+- Maintain factual accuracy
+- Provide complete citations
+
+**Answer:**"""
+
+
+class QueryTranslator:
+    """Translate Chinese queries to English for better retrieval"""
+
+    TRANSLATION_PROMPT = """Translate the following Chinese financial question to English.
+Keep technical terms accurate (e.g., "risk factors", "revenue", "net income").
+
+Question: {chinese_question}
+
+English translation:"""
+
+    def __init__(self, client: OpenAI = None):
+        """Initialize translator"""
+        self.client = client or self._get_default_client()
+
+    def _get_default_client(self) -> Optional[OpenAI]:
+        """Get default OpenAI client if configured"""
+        if settings.llm_provider == "deepseek" and settings.deepseek_api_key:
+            return OpenAI(
+                api_key=settings.deepseek_api_key,
+                base_url=settings.deepseek_base_url,
+            )
+        return None
+
+    def translate(self, chinese_query: str) -> str:
+        """
+        Translate Chinese query to English.
+
+        Args:
+            chinese_query: Query in Chinese
+
+        Returns:
+            Query in English (or original if translation fails)
+        """
+        if not self.client:
+            logger.warning("No LLM client configured, returning original query")
+            return chinese_query
+
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": "You are a financial translator."},
+                    {"role": "user", "content": self.TRANSLATION_PROMPT.format(chinese_question=chinese_query)},
+                ],
+                temperature=0.1,
+                max_tokens=200,
+            )
+            english_query = response.choices[0].message.content.strip()
+            logger.info(f"Translated query: {chinese_query} -> {english_query}")
+            return english_query
+        except Exception as e:
+            logger.error(f"Translation failed: {e}, using original query")
+            return chinese_query
+
+
+class AnswerGenerator:
+    """Generate answers using LLM with retrieved context"""
+
+    def __init__(self, client: OpenAI = None):
+        """
+        Initialize answer generator.
+
+        Args:
+            client: OpenAI client (optional)
+        """
+        self.client = client or self._get_client()
+        self.query_translator = QueryTranslator(client)
+        self.templates = PromptTemplate()
+
+        logger.info("Answer generator initialized")
+
+    def _get_client(self) -> Optional[OpenAI]:
+        """Get configured LLM client"""
+        if settings.llm_provider == "deepseek" and settings.deepseek_api_key:
+            return OpenAI(
+                api_key=settings.deepseek_api_key,
+                base_url=settings.deepseek_base_url,
+            )
+        logger.warning(f"No LLM client configured for provider: {settings.llm_provider}")
+        return None
+
+    def generate(
+        self,
+        question: str,
+        retrieved_docs: List[RetrievedDocument],
+        query_type: str = "factual",
+        debug_info: Dict[str, Any] = None,
+    ) -> tuple[str, List[Citation]]:
+        """
+        Generate answer based on retrieved documents.
+
+        Args:
+            question: User question
+            retrieved_docs: Retrieved relevant documents
+            query_type: Type of query (factual, comparative, summary)
+            debug_info: Debug information from retrieval
+
+        Returns:
+            Tuple of (answer, citations)
+        """
+        if not retrieved_docs:
+            return "抱歉，未找到相关信息。无法回答该问题。", []
+
+        # Build context from retrieved documents
+        context = self._build_context(retrieved_docs)
+
+        # Select template based on query type
+        if query_type == "comparative":
+            prompt = self.templates.COMPARATIVE_TEMPLATE
+        elif query_type == "summary":
+            prompt = self.templates.SUMMARY_TEMPLATE
+        else:
+            prompt = self.templates.FACTUAL_TEMPLATE
+
+        # Build full prompt
+        full_prompt = prompt.format(
+            question=question,
+            context=context,
+        )
+
+        # Generate answer
+        if not self.client:
+            # Fallback: simple concatenation without LLM
+            answer = self._generate_simple_answer(question, retrieved_docs)
+        else:
+            answer = self._generate_with_llm(full_prompt)
+
+        # Extract citations
+        citations = self._extract_citations(retrieved_docs)
+
+        return answer, citations
+
+    def _build_context(self, docs: List[RetrievedDocument]) -> str:
+        """Build context string from retrieved documents"""
+        context_parts = []
+
+        for i, doc in enumerate(docs, 1):
+            metadata = doc.metadata
+            source = f"[{i}] Year: {metadata.get('year', 'N/A')}, Section: {metadata.get('section_title', 'N/A')}"
+
+            # Truncate very long documents
+            text = doc.text
+            if len(text) > 1000:
+                text = text[:1000] + "..."
+
+            context_parts.append(f"{source}\n{text}")
+
+        return "\n\n".join(context_parts)
+
+    def _generate_with_llm(self, prompt: str) -> str:
+        """Generate answer using LLM"""
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": self.templates.SYSTEM_TEMPLATE},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=1500,
+            )
+            answer = response.choices[0].message.content.strip()
+            return answer
+        except Exception as e:
+            logger.error(f"LLM generation failed: {e}")
+            return "抱歉，生成答案时出错。请稍后重试。"
+
+    def _generate_simple_answer(
+        self,
+        question: str,
+        docs: List[RetrievedDocument],
+    ) -> str:
+        """Generate simple answer without LLM"""
+        answer_parts = ["结论：\n"]
+
+        # Group documents by year
+        by_year = {}
+        for doc in docs:
+            year = doc.metadata.get("year", "N/A")
+            if year not in by_year:
+                by_year[year] = []
+            by_year[year].append(doc)
+
+        # Build answer by year
+        for year in sorted(by_year.keys(), reverse=True):
+            year_docs = by_year[year]
+            answer_parts.append(f"\n{year}年：")
+            for doc in year_docs[:2]:  # Limit to 2 docs per year
+                text = doc.text[:200] + "..." if len(doc.text) > 200 else doc.text
+                answer_parts.append(f"- {text}")
+
+        answer_parts.append("\n\n依据：请参考上述引用的文档片段。")
+
+        return "\n".join(answer_parts)
+
+    def _extract_citations(self, docs: List[RetrievedDocument]) -> List[Citation]:
+        """Extract citation information from retrieved documents"""
+        citations = []
+
+        for doc in docs:
+            metadata = doc.metadata
+            citation = Citation(
+                year=metadata.get("year", 0),
+                section_title=metadata.get("section_title", ""),
+                chunk_id=f"{metadata.get('doc_id', '')}_{metadata.get('chunk_id', 0)}",
+                relevance_score=doc.score,
+            )
+            citations.append(citation)
+
+        return citations
+
+    def translate_query(self, chinese_query: str) -> str:
+        """
+        Translate Chinese query to English for retrieval.
+
+        Args:
+            chinese_query: Query in Chinese
+
+        Returns:
+            Query in English
+        """
+        return self.query_translator.translate(chinese_query)
