@@ -156,8 +156,7 @@ async def build_index(request: IndexBuildRequest):
 
         # Build ChromaDB index
         logger.info("Building ChromaDB index...")
-        if request.force_rebuild:
-            components["chroma_retriever"].delete_collection()
+        components["chroma_retriever"].delete_collection()
         components["chroma_retriever"].build_index(chunks)
 
         logger.info(f"Index build complete: {len(chunks)} chunks indexed")
