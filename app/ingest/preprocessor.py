@@ -19,6 +19,10 @@ class ItemTypeMapper:
 
     # Item type mapping patterns
     ITEM_PATTERNS = {
+        "reserved": [
+            r"item\s*6\.?\s*\[?\s*reserved\s*\]?",
+            r"selected\s*financial\s*data\s*/\s*reserved",
+        ],
         "business": [
             r"item\s*1\.?\s*business",
             r"item\s*i\.?\s*business",
@@ -67,6 +71,13 @@ class ItemTypeMapper:
                 if re.search(pattern, title_lower):
                     return item_type
 
+        if "balance sheet" in title_lower:
+            return "financial_statements"
+        if "income statement" in title_lower or "statements of operations" in title_lower:
+            return "financial_statements"
+        if "cash flow" in title_lower:
+            return "financial_statements"
+
         return "other"
 
 
@@ -87,15 +98,21 @@ class TextCleaner:
         if not text:
             return ""
 
-        # Remove excessive whitespace
-        text = re.sub(r"\s+", " ", text)
+        # Normalize line endings first so table structure is preserved.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-        # Remove control characters but keep newlines
+        # Remove control characters but keep newlines and tabs.
         text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
 
-        # Remove page numbers and headers (common patterns)
-        text = re.sub(r"\n\s*\d+\s*\n", "\n", text)
+        # Normalize inline spaces without flattening the whole document.
+        text = re.sub(r"[ \t]+", " ", text)
+
+        # Remove page numbers and headers (common patterns).
+        text = re.sub(r"(?m)^\s*\d+\s*$", "", text)
         text = re.sub(r"Page\s+\d+", "", text)
+
+        # Collapse excessive blank lines while preserving row boundaries.
+        text = re.sub(r"\n{3,}", "\n\n", text)
 
         return text.strip()
 
@@ -112,7 +129,10 @@ class TextCleaner:
         """
         # Simple heuristic: lots of numbers and '|' characters
         # or multiple numeric values per line
-        lines = text.split("\n")
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        if len(lines) < 2:
+            return False
+
         numeric_lines = 0
 
         for line in lines:
