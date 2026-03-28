@@ -16,6 +16,7 @@ from app.retrieve.chroma_retriever import ChromaRetriever
 from app.retrieve.hybrid_retriever import HybridRetriever
 from app.generate.answer_generator import AnswerGenerator
 from app.core.config import settings
+from app.core.conversation import ConversationManager
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
         components["bm25_retriever"] = BM25Retriever()
         components["chroma_retriever"] = ChromaRetriever()
         components["answer_generator"] = AnswerGenerator()
+        components["conversation_manager"] = ConversationManager()
         components["hybrid_retriever"] = HybridRetriever(
             bm25_retriever=components["bm25_retriever"],
             chroma_retriever=components["chroma_retriever"],
@@ -193,19 +195,37 @@ async def query(request: QueryRequest):
     4. Return answer with citations
     """
     try:
-        # Translate query for better retrieval
-        english_query = components["answer_generator"].translate_query(request.question)
+        session_id = components["conversation_manager"].ensure_session(request.session_id)
+        conversation_history = components["conversation_manager"].get_history(session_id)
+
+        # Rewrite query for retrieval when the current turn depends on prior context.
+        retrieval_query = components["answer_generator"].build_retrieval_query(
+            request.question,
+            conversation_history=conversation_history,
+        )
 
         # Retrieve documents
         retrieved_docs, debug_info = components["hybrid_retriever"].retrieve(
-            query=english_query,
+            query=retrieval_query,
             k=request.max_results,
         )
 
+        debug_info["session_id"] = session_id
+        debug_info["conversation_turn_count"] = len(conversation_history)
+        debug_info["retrieval_query"] = retrieval_query
+
         if not retrieved_docs:
+            answer = "抱歉，未找到相关信息。请尝试重新表述您的问题。"
+            updated_history = components["conversation_manager"].append_turn(
+                session_id,
+                request.question,
+                answer,
+            )
             return QueryResponse(
-                answer="抱歉，未找到相关信息。请尝试重新表述您的问题。",
+                session_id=session_id,
+                answer=answer,
                 citations=[],
+                conversation_history=updated_history,
                 retrieval_debug=debug_info,
             )
 
@@ -216,11 +236,19 @@ async def query(request: QueryRequest):
             retrieved_docs=retrieved_docs,
             query_type=query_type,
             debug_info=debug_info,
+            conversation_history=conversation_history,
+        )
+        updated_history = components["conversation_manager"].append_turn(
+            session_id,
+            request.question,
+            answer,
         )
 
         return QueryResponse(
+            session_id=session_id,
             answer=answer,
             citations=citations,
+            conversation_history=updated_history,
             retrieval_debug=debug_info if request.include_citations else None,
         )
     except Exception as e:
