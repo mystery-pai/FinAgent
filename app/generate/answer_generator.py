@@ -3,10 +3,11 @@ Answer generation using LLM with retrieved context.
 基于检索上下文的LLM答案生成
 """
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 
-from app.schemas.models import RetrievedDocument, Citation
+from app.schemas.models import RetrievedDocument, Citation, ConversationTurn
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,12 @@ class PromptTemplate:
 补充说明：[Additional context if needed]
 """
 
-    FACTUAL_TEMPLATE = """Based on the following 10-K report fragments, answer the question.
+    FACTUAL_TEMPLATE = """Based on the following 10-K report fragments and recent conversation history, answer the question.
 
 **Question:** {question}
+
+**Recent Conversation:**
+{conversation_history}
 
 **Context Fragments:**
 {context}
@@ -46,9 +50,12 @@ class PromptTemplate:
 
 **Answer:**"""
 
-    COMPARATIVE_TEMPLATE = """Based on the following 10-K report fragments, provide a comparative analysis.
+    COMPARATIVE_TEMPLATE = """Based on the following 10-K report fragments and recent conversation history, provide a comparative analysis.
 
 **Question:** {question}
+
+**Recent Conversation:**
+{conversation_history}
 
 **Context Fragments:**
 {context}
@@ -61,9 +68,12 @@ class PromptTemplate:
 
 **Answer:**"""
 
-    SUMMARY_TEMPLATE = """Based on the following 10-K report fragments, provide a comprehensive summary.
+    SUMMARY_TEMPLATE = """Based on the following 10-K report fragments and recent conversation history, provide a comprehensive summary.
 
 **Topic:** {question}
+
+**Recent Conversation:**
+{conversation_history}
 
 **Context Fragments:**
 {context}
@@ -75,6 +85,22 @@ class PromptTemplate:
 - Provide complete citations
 
 **Answer:**"""
+
+    QUERY_REWRITE_TEMPLATE = """Rewrite the current question into a standalone English retrieval query.
+
+**Recent Conversation:**
+{conversation_history}
+
+**Current Question:**
+{question}
+
+**Requirements:**
+- Keep the rewritten query concise
+- Resolve pronouns or omitted subjects using the conversation
+- Preserve years, metrics and company names
+- Return English only
+
+**Standalone Query:**"""
 
 
 class QueryTranslator:
@@ -110,6 +136,9 @@ English translation:"""
         Returns:
             Query in English (or original if translation fails)
         """
+        if not re.search(r"[\u4e00-\u9fff]", chinese_query):
+            return chinese_query
+
         if not self.client:
             logger.warning("No LLM client configured, returning original query")
             return chinese_query
@@ -164,6 +193,7 @@ class AnswerGenerator:
         retrieved_docs: List[RetrievedDocument],
         query_type: str = "factual",
         debug_info: Dict[str, Any] = None,
+        conversation_history: Optional[List[ConversationTurn]] = None,
     ) -> tuple[str, List[Citation]]:
         """
         Generate answer based on retrieved documents.
@@ -182,6 +212,7 @@ class AnswerGenerator:
 
         # Build context from retrieved documents
         context = self._build_context(retrieved_docs)
+        history_text = self._build_conversation_history(conversation_history)
 
         # Select template based on query type
         if query_type == "comparative":
@@ -195,6 +226,7 @@ class AnswerGenerator:
         full_prompt = prompt.format(
             question=question,
             context=context,
+            conversation_history=history_text,
         )
 
         # Generate answer
@@ -208,6 +240,55 @@ class AnswerGenerator:
         citations = self._extract_citations(retrieved_docs)
 
         return answer, citations
+
+    def build_retrieval_query(
+        self,
+        question: str,
+        conversation_history: Optional[List[ConversationTurn]] = None,
+    ) -> str:
+        """
+        Build retrieval query with optional conversation-aware rewriting.
+
+        Args:
+            question: Current user question
+            conversation_history: Recent conversation turns
+
+        Returns:
+            Retrieval-friendly English query
+        """
+        translated_question = self.translate_query(question)
+        history = conversation_history or []
+
+        if not history or not self._looks_like_follow_up(question):
+            return translated_question
+
+        history_text = self._build_conversation_history(history[-3:])
+        if not self.client:
+            last_question = history[-1].question
+            return f"{last_question} {translated_question}".strip()
+
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": "You rewrite follow-up questions for retrieval."},
+                    {
+                        "role": "user",
+                        "content": self.templates.QUERY_REWRITE_TEMPLATE.format(
+                            conversation_history=history_text,
+                            question=question,
+                        ),
+                    },
+                ],
+                temperature=0.1,
+                max_tokens=200,
+            )
+            rewritten_query = response.choices[0].message.content.strip()
+            return rewritten_query or translated_question
+        except Exception as e:
+            logger.error(f"Query rewrite failed: {e}, falling back to translated question")
+            last_question = history[-1].question
+            return f"{last_question} {translated_question}".strip()
 
     def _build_context(self, docs: List[RetrievedDocument]) -> str:
         """Build context string from retrieved documents"""
@@ -225,6 +306,34 @@ class AnswerGenerator:
             context_parts.append(f"{source}\n{text}")
 
         return "\n\n".join(context_parts)
+
+    def _build_conversation_history(
+        self,
+        turns: Optional[List[ConversationTurn]],
+    ) -> str:
+        """Build a compact conversation history string."""
+        if not turns:
+            return "None"
+
+        history_parts = []
+        for index, turn in enumerate(turns[-settings.conversation_window_size :], start=1):
+            history_parts.append(
+                f"[{index}] User: {turn.question}\nAssistant: {turn.answer}"
+            )
+
+        return "\n\n".join(history_parts)
+
+    def _looks_like_follow_up(self, question: str) -> bool:
+        """Detect if a question depends on previous turns."""
+        normalized_question = question.strip().lower()
+        if len(normalized_question.split()) <= 6:
+            return True
+
+        follow_up_patterns = [
+            r"\b(what about|how about|and what|and how|same for|compare that|compare it|those|them|it)\b",
+            r"(那|那么|这个|这个呢|那个|那个呢|它|它们|还有呢|对比一下|相比呢|上一年|前一年)",
+        ]
+        return any(re.search(pattern, normalized_question) for pattern in follow_up_patterns)
 
     def _generate_with_llm(self, prompt: str) -> str:
         """Generate answer using LLM"""
