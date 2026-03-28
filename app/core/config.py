@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     table_chunk_size: int = Field(default=1536)
     table_header_lines: int = Field(default=3)
     table_row_overlap: int = Field(default=1)
+    conversation_window_size: int = Field(default=10)
 
     # API settings
     api_host: str = Field(default="0.0.0.0")
