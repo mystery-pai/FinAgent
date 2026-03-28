@@ -46,9 +46,13 @@ embeddings/
 # OS
 .DS_Store
 Thumbs.db
+migration.bin
 
 # Logs
 *.log
+
+conversation.txt
+project.md
 
 # Streamlit
 .streamlit/
