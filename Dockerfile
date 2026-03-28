@@ -30,7 +30,8 @@ RUN python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p data/processed/chunks indexes embeddings logs
+RUN mkdir -p data/processed/chunks data/bm25_index data/chroma_db indexes embeddings logs && \
+    chmod +x scripts/start_services.sh
 
 # Expose ports
 # 8501 for Streamlit UI
@@ -38,8 +39,8 @@ RUN mkdir -p data/processed/chunks indexes embeddings logs
 EXPOSE 8501 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10m --retries=3 \
+    CMD curl -f http://localhost:8501/_stcore/health && curl -f http://localhost:8000/health || exit 1
 
-# Default command: run Streamlit app
-CMD ["streamlit", "run", "ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Default command: build indexes if needed, then run API and UI
+CMD ["sh", "scripts/start_services.sh"]

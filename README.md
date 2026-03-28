@@ -93,15 +93,23 @@ cd fin-agent
 cp .env.example .env
 # 编辑 .env 文件，设置 DEEPSEEK_API_KEY
 
-# 3. 构建索引
-docker-compose run app python3 scripts/build_index.py
-
-# 4. 启动服务
+# 3. 启动服务
 docker-compose up -d
+
+# 4. 查看日志（首次启动会自动检测索引，不存在则构建）
+docker-compose logs -f app
 
 # 5. 访问 UI
 open http://localhost:8501
+
+# 6. 调用 API
+curl http://localhost:8000/health
 ```
+
+说明：
+- 容器启动时会自动检查 `data/bm25_index` 和 `data/chroma_db`。
+- 如果索引不存在，会自动执行 `python3 scripts/build_index.py`，首次启动时间会更长。
+- `8501` 为 Streamlit UI，`8000` 为 FastAPI API。
 
 ### 方式二：本地运行
 
