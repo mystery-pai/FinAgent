@@ -11,6 +11,7 @@ pydantic>=2.5.3
 # Data processing
 numpy>=1.26.0
 pandas>=2.0.3
+datasets>=2.16.0
 
 # Utilities
 python-dotenv>=1.0.0
@@ -27,3 +28,4 @@ streamlit>=1.31.0
 # LLM client
 openai>=1.12.0  # For DeepSeek API (OpenAI-compatible)
 requests>=2.31.0
+ragas>=0.2.0
