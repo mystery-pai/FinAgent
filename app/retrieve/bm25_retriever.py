@@ -4,6 +4,7 @@ BM25关键词检索器
 """
 import json
 import pickle
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
@@ -66,6 +67,7 @@ class BM25Retriever:
             chunks: List of document chunks
         """
         logger.info(f"Building BM25 index from {len(chunks)} chunks")
+        self.delete_index()
 
         self.corpus = []
         self.doc_ids = []
@@ -96,6 +98,19 @@ class BM25Retriever:
         self._save_index()
 
         logger.info("BM25 index built and saved")
+
+    def delete_index(self) -> None:
+        """Delete local BM25 index files before rebuilding."""
+        index_path = Path(self.index_path)
+        self.corpus = []
+        self.doc_ids = []
+        self.bm25_index = None
+
+        if not index_path.exists():
+            return
+
+        shutil.rmtree(index_path)
+        logger.info(f"Deleted BM25 index directory: {index_path}")
 
     def _build_simple_bm25(self, tokenized_corpus: List[List[str]]) -> Dict[str, Any]:
         """
