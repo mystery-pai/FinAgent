@@ -382,9 +382,9 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 
 ### 检索增强
 - [ ] **Rerank 增强**：引入重排序模型提升检索精度
-- [ ] **表格增强**
-  - 给 `_split_table()` 增加表头复用或轻量 overlap
-  - 现金流表等 section 尽量切成更少的 chunk（更大的 table chunk size）
+- [x] **表格增强** ✅
+  - ✅ 给 `_split_table()` 增加表头复用或轻量 overlap
+  - ✅ 现金流表等 section 尽量切成更少的 chunk（更大的 table chunk size）
 - [ ] **Chunk Refiner**：优化 chunk 边界，提升上下文完整性
 - [ ] **Metadata Enricher**：增强文档元数据，支持更精确的过滤
 
