@@ -40,11 +40,8 @@ class ChromaRetriever:
         self.persist_directory = persist_directory or settings.chroma_persist_dir
         self.embedding_model_name = embedding_model or settings.embedding_model
 
-        # Initialize embedding function
-        self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=self.embedding_model_name,
-            device=settings.embedding_device,
-        )
+        # Prefer local model cache first to avoid network/proxy issues in local debugging.
+        self.embedding_function = self._create_embedding_function()
 
         # Initialize ChromaDB client
         self.client = PersistentClient(
@@ -56,6 +53,29 @@ class ChromaRetriever:
         self.collection = self._get_or_create_collection()
 
         logger.info(f"ChromaDB retriever initialized with collection: {self.collection_name}")
+
+    def _create_embedding_function(self):
+        """
+        Create embedding function with local-cache-first strategy.
+
+        Returns:
+            SentenceTransformer embedding function
+        """
+        try:
+            embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name=self.embedding_model_name,
+                device=settings.embedding_device,
+                local_files_only=True,
+            )
+            logger.info(f"Loaded embedding model from local cache: {self.embedding_model_name}")
+            return embedding_function
+        except Exception as exc:
+            logger.warning(f"Local embedding cache unavailable for {self.embedding_model_name}: {exc}")
+
+        return embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=self.embedding_model_name,
+            device=settings.embedding_device,
+        )
 
     def _get_or_create_collection(self) -> Collection:
         """
