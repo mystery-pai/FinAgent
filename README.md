@@ -199,15 +199,19 @@ curl -X POST "http://127.0.0.1:8000/query" \
 3. 检查当前分块参数
 - `CHUNK_SIZE=512`
 - `CHUNK_OVERLAP=50`
+- `TABLE_CHUNK_SIZE=1536`
+- `TABLE_HEADER_LINES=3`
+- `TABLE_ROW_OVERLAP=1`
 
 注意：
-- `chunk_overlap` 目前只对普通文本分块生效。
-- 表格分块走 `app/ingest/preprocessor.py` 里的 `_split_table()`，默认没有 overlap。
-- 因此现金流量表可能会被切成多个独立 chunk，例如 operating / investing / financing / supplemental disclosure 分散到不同块。
+- `chunk_overlap` 只对普通文本分块生效。
+- 表格分块走 `app/ingest/preprocessor.py` 里的 `_split_table()`，现在会复用前几行表头，并按行做轻量 overlap。
+- 表格还会使用更大的 `TABLE_CHUNK_SIZE`，尽量把现金流量表、资产负债表这类 section 切成更少的 chunk。
 
 当前已实现的修复策略：
 - `hybrid` 已改为 chunk 级融合，不再按整个 section 融合。
 - 当 query 命中 `cash_flow` 且召回到 `Cash Flow Statement` 时，会自动扩展同一文档的邻接 chunk，把整张表的相邻块一并带入上下文。
+- `_split_table()` 会在每个表格 chunk 里复用表头，并保留轻量 overlap，降低“命中后只看到表尾”的概率。
 
 推荐原则：
 - 先保留当前 `chunk_size` / `chunk_overlap`，优先观察邻接 chunk 扩展是否已经解决“表格上下文不完整”。
@@ -236,6 +240,18 @@ Compare the risk factors between 2024 and 2025
 Summarize Apple's business overview
 What is Apple's overall financial condition in 2025?
 ```
+
+### 标准问答示例
+
+问题（Question）：
+根据 2025 年 10-K 报告，Apple 在 2025 财年的总净销售额是多少？相比 2024 财年的增长率是多少？
+
+回答（Answer）：
+Apple 在 2025 财年的总净销售额为 4,161.61 亿美元。相比 2024 财年的 3,910.35 亿美元，增长率为 6%。
+
+简化问答：
+Q: 2025 财年的总净销售额是多少
+A: 结论：2025财年的总净销售额为4161.61亿美元。
 
 ### UI 功能
 
@@ -303,6 +319,9 @@ VECTOR_TOP_K=10
 FINAL_TOP_K=5
 CHUNK_SIZE=512
 CHUNK_OVERLAP=50
+TABLE_CHUNK_SIZE=1536
+TABLE_HEADER_LINES=3
+TABLE_ROW_OVERLAP=1
 ```
 
 ---
