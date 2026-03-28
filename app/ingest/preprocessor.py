@@ -161,6 +161,9 @@ class DocumentChunker:
         """
         self.chunk_size = chunk_size or settings.chunk_size
         self.chunk_overlap = chunk_overlap or settings.chunk_overlap
+        self.table_chunk_size = max(self.chunk_size, settings.table_chunk_size)
+        self.table_header_lines = max(0, settings.table_header_lines)
+        self.table_row_overlap = max(0, settings.table_row_overlap)
 
     def chunk_section(
         self,
@@ -200,7 +203,7 @@ class DocumentChunker:
 
         if is_table:
             # For tables, keep as single chunk if reasonable size
-            if len(cleaned_text) <= self.chunk_size * 2:
+            if len(cleaned_text) <= self.table_chunk_size:
                 chunks.append(
                     DocumentChunk(
                         doc_id=doc_id,
@@ -295,42 +298,58 @@ class DocumentChunker:
         item_type: str,
         text: str,
     ) -> List[DocumentChunk]:
-        """Split table into chunks by rows"""
+        """Split table into larger row-based chunks with header reuse."""
         chunks = []
-        lines = text.split("\n")
-        chunk_lines = []
-        current_size = 0
-        chunk_id = 0
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
 
-        for line in lines:
-            line_size = len(line)
-            if current_size + line_size > self.chunk_size and chunk_lines:
-                # Save current chunk
-                chunk_text = "\n".join(chunk_lines)
-                chunks.append(
-                    DocumentChunk(
-                        doc_id=doc_id,
-                        symbol=symbol,
-                        year=year,
-                        form_type=form_type,
-                        section_id=section_id,
-                        section_title=section_title,
-                        item_type=item_type,
-                        text=chunk_text,
-                        chunk_id=chunk_id,
-                        metadata={"is_table": True, "row_count": len(chunk_lines)},
-                    )
+        if not lines:
+            return chunks
+
+        header_lines = self._get_table_header_lines(lines)
+        body_lines = lines[len(header_lines):]
+
+        if not body_lines:
+            return [
+                DocumentChunk(
+                    doc_id=doc_id,
+                    symbol=symbol,
+                    year=year,
+                    form_type=form_type,
+                    section_id=section_id,
+                    section_title=section_title,
+                    item_type=item_type,
+                    text="\n".join(lines),
+                    chunk_id=0,
+                    metadata={
+                        "is_table": True,
+                        "row_count": len(lines),
+                        "header_lines": len(header_lines),
+                        "overlap_lines": 0,
+                    },
                 )
-                chunk_id += 1
-                chunk_lines = [line]
-                current_size = line_size
-            else:
-                chunk_lines.append(line)
-                current_size += line_size
+            ]
 
-        # Add remaining lines
-        if chunk_lines:
-            chunk_text = "\n".join(chunk_lines)
+        header_size = sum(len(line) + 1 for line in header_lines)
+        body_budget = max(self.chunk_size, self.table_chunk_size - header_size)
+        chunk_id = 0
+        start = 0
+
+        while start < len(body_lines):
+            chunk_body = []
+            current_size = 0
+            end = start
+
+            while end < len(body_lines):
+                line = body_lines[end]
+                line_size = len(line) + 1
+                if chunk_body and current_size + line_size > body_budget:
+                    break
+
+                chunk_body.append(line)
+                current_size += line_size
+                end += 1
+
+            chunk_text = "\n".join(header_lines + chunk_body if header_lines else chunk_body)
             chunks.append(
                 DocumentChunk(
                     doc_id=doc_id,
@@ -342,11 +361,38 @@ class DocumentChunker:
                     item_type=item_type,
                     text=chunk_text,
                     chunk_id=chunk_id,
-                    metadata={"is_table": True, "row_count": len(chunk_lines)},
+                    metadata={
+                        "is_table": True,
+                        "row_count": len(chunk_body),
+                        "header_lines": len(header_lines),
+                        "overlap_lines": self.table_row_overlap if start > 0 else 0,
+                    },
                 )
             )
+            chunk_id += 1
+
+            if end >= len(body_lines):
+                break
+
+            next_start = max(start + 1, end - self.table_row_overlap)
+            start = next_start
 
         return chunks
+
+    def _get_table_header_lines(self, lines: List[str]) -> List[str]:
+        """Reuse a small leading header block for each table chunk."""
+        if self.table_header_lines == 0:
+            return []
+
+        header_lines = []
+        for line in lines:
+            if not line:
+                continue
+            header_lines.append(line)
+            if len(header_lines) >= self.table_header_lines:
+                break
+
+        return header_lines
 
 
 class FinancialDataProcessor:

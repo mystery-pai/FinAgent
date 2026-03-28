@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     hybrid_k: int = Field(default=5)
     chunk_size: int = Field(default=512)
     chunk_overlap: int = Field(default=50)
+    table_chunk_size: int = Field(default=1536)
+    table_header_lines: int = Field(default=3)
+    table_row_overlap: int = Field(default=1)
 
     # API settings
     api_host: str = Field(default="0.0.0.0")
