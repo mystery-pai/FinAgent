@@ -131,7 +131,16 @@ cp .env.example .env
 # 5. 构建索引
 python3 scripts/build_index.py
 
-# 6. 启动 UI
+# 6. 启动服务
+
+# 方式 A：仅启动 Streamlit UI（适合快速体验）
+streamlit run ui/streamlit_app.py
+
+# 方式 B：同时启动 UI 和 API（适合完整功能）
+# 终端 1：启动 FastAPI 服务
+./venv/bin/python -m app.api.main
+
+# 终端 2：启动 Streamlit UI
 streamlit run ui/streamlit_app.py
 ```
 
