@@ -3,12 +3,16 @@ Streamlit UI for Fin-Agent AAPL 10-K Q&A System
 """
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 from loguru import logger
+
+from app.core.config import settings
+from app.schemas.models import ConversationTurn
 
 # Configure page
 st.set_page_config(
@@ -57,6 +61,10 @@ def init_session_state():
         st.session_state.generator = None
     if "query_history" not in st.session_state:
         st.session_state.query_history = []
+    if "conversation_turns" not in st.session_state:
+        st.session_state.conversation_turns = []
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = uuid4().hex
 
 
 def load_system_components():
@@ -122,18 +130,18 @@ def render_sidebar():
         - **LLM**: DeepSeek / Ollama
         """)
 
+        if st.button("Clear Conversation", use_container_width=True):
+            st.session_state.conversation_turns = []
+            st.session_state.query_history = []
+            st.session_state.session_id = uuid4().hex
+            st.rerun()
+
         return top_k, use_hybrid, year_filter, llm_provider
 
 
-def render_answer(answer: str, citations: list, debug_info: dict):
-    """Render answer with citations and debug info"""
-    # Answer
-    st.markdown("### 📝 Answer")
-    st.markdown(answer)
-
-    # Citations
+def render_citations(citations: list, key_prefix: str):
+    """Render citations list."""
     if citations:
-        st.markdown("### 📚 Citations")
         for i, citation in enumerate(citations, 1):
             # Handle both dict and Pydantic model
             if hasattr(citation, 'model_dump'):
@@ -148,7 +156,7 @@ def render_answer(answer: str, citations: list, debug_info: dict):
             chunk_id = cit_data.get('chunk_id', 'N/A')
             score = cit_data.get('relevance_score', cit_data.get('score', 0))
 
-            with st.expander(f"Citation {i}: {year} - {section_title}"):
+            with st.expander(f"Citation {i}: {year} - {section_title}", expanded=False):
                 st.markdown(f"**Chunk ID**: `{chunk_id}`")
                 st.markdown(f"**Relevance Score**: `{score:.4f}`")
                 # Add item_type if available in metadata
@@ -159,11 +167,33 @@ def render_answer(answer: str, citations: list, debug_info: dict):
                     st.markdown("**Snippet**:")
                     st.markdown(f"<div class='citation-box'>{cit_data['text'][:500]}...</div>", unsafe_allow_html=True)
 
-    # Debug info
-    with st.expander("🔍 Retrieval Debug Info"):
+
+def render_debug_info(debug_info: dict, key_prefix: str):
+    """Render retrieval debug info."""
+    if not debug_info:
+        return
+
+    with st.expander("🔍 Retrieval Debug Info", expanded=False):
         st.markdown(f"<div class='debug-box'>", unsafe_allow_html=True)
         st.json(debug_info)
         st.markdown(f"</div>", unsafe_allow_html=True)
+
+
+def render_conversation():
+    """Render recent conversation turns."""
+    if not st.session_state.conversation_turns:
+        return
+
+    st.markdown("### 💬 Conversation")
+
+    for index, turn in enumerate(st.session_state.conversation_turns, start=1):
+        with st.chat_message("user"):
+            st.markdown(turn["question"])
+
+        with st.chat_message("assistant"):
+            st.markdown(turn["answer"])
+            render_citations(turn.get("citations", []), key_prefix=f"turn_{index}")
+            render_debug_info(turn.get("debug_info"), key_prefix=f"turn_{index}")
 
 
 def render_query_history():
@@ -198,6 +228,7 @@ def main():
     # Render UI
     render_header()
     top_k, use_hybrid, year_filter, llm_provider = render_sidebar()
+    render_conversation()
 
     # Initialize example query in session state
     if "example_query" not in st.session_state:
@@ -259,10 +290,21 @@ def main():
     if submitted and query:
         # Add to history
         st.session_state.query_history.append(query)
+        st.session_state.query_history = st.session_state.query_history[-settings.conversation_window_size :]
+
+        conversation_history = [
+            ConversationTurn(question=turn["question"], answer=turn["answer"])
+            for turn in st.session_state.conversation_turns
+        ]
 
         # Show progress
         with st.spinner("Retrieving relevant information..."):
             try:
+                retrieval_query = st.session_state.generator.build_retrieval_query(
+                    query,
+                    conversation_history=conversation_history,
+                )
+
                 # Build filters
                 filters = {}
                 if year_filter:
@@ -270,7 +312,7 @@ def main():
 
                 # Retrieve
                 retrieved_docs, debug_info = st.session_state.retriever.retrieve(
-                    query=query,
+                    query=retrieval_query,
                     k=top_k,
                     filters=filters if filters else None
                 )
@@ -286,21 +328,32 @@ def main():
                         question=query,
                         retrieved_docs=results,
                         query_type=debug_info.get("query_type", "factual"),
-                        debug_info=debug_info
+                        debug_info=debug_info,
+                        conversation_history=conversation_history,
                     )
 
-                    # Display results
-                    render_answer(
-                        answer=answer,
-                        citations=citations,
-                        debug_info={
-                            "query": query,
-                            "top_k": top_k,
-                            "year_filter": year_filter,
-                            "retrieved_count": len(results),
-                            **debug_info
+                    turn_debug = {
+                        "query": query,
+                        "retrieval_query": retrieval_query,
+                        "session_id": st.session_state.session_id,
+                        "conversation_turn_count": len(conversation_history),
+                        "top_k": top_k,
+                        "year_filter": year_filter,
+                        "retrieved_count": len(results),
+                        **debug_info
+                    }
+                    st.session_state.conversation_turns.append(
+                        {
+                            "question": query,
+                            "answer": answer,
+                            "citations": citations,
+                            "debug_info": turn_debug,
                         }
                     )
+                    st.session_state.conversation_turns = st.session_state.conversation_turns[
+                        -settings.conversation_window_size :
+                    ]
+                    st.rerun()
 
             except Exception as e:
                 st.error(f"Error processing query: {str(e)}")
