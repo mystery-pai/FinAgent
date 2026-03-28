@@ -17,6 +17,7 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 - ✅ **混合检索**：结合 BM25 关键词匹配和向量语义搜索
 - ✅ **可追溯引用**：每个答案都标注来源（年份 + Section）
 - ✅ **跨年分析**：支持对比不同年份的数据变化
+- ✅ **多轮对话**：按会话保留最近 10 轮问答上下文
 - ✅ **本地部署**：所有组件均可本地运行，无需云服务
 - ✅ **容器化**：Docker 一键部署开箱即用
 
@@ -34,6 +35,8 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 [Hybrid Retriever]
     ├─ BM25 Retriever (关键词精确匹配)
     └─ Chroma Retriever (向量语义搜索)
+    ↓
+[Conversation Window] → 保留最近 10 轮问答
     ↓
 [RRF Fusion] → 合并去重 → 规则重排序
     ↓
@@ -177,10 +180,18 @@ curl -X POST "http://127.0.0.1:8000/query" \
   -d "{\"question\":\"Apple's cash flow 2025\",\"max_results\":10,\"include_citations\":true}"
 ```
 
+```bash
+# 3. Continue the same conversation with session_id returned by the previous response
+curl -X POST "http://127.0.0.1:8000/query" \
+  -H "Content-Type: application/json" \
+  -d "{\"question\":\"What about 2024?\",\"session_id\":\"<session_id>\",\"max_results\":10,\"include_citations\":true}"
+```
+
 说明：
 - 默认监听地址为 `http://127.0.0.1:8000`，可通过 `.env` 中的 `API_HOST` 和 `API_PORT` 调整。
 - `max_results` 对应检索条数，和 `scripts/debug_answer.py` 里的 `--top-k` 含义一致。
 - 如果要和 CLI 做结果对比，建议使用同一个问题，例如 `Apple's cash flow 2025`。
+- `/query` 会在响应中返回 `session_id` 和最近 10 轮 `conversation_history`，后续多轮追问时复用同一个 `session_id` 即可。
 
 ### 表格类问题排障策略
 
@@ -322,6 +333,7 @@ CHUNK_OVERLAP=50
 TABLE_CHUNK_SIZE=1536
 TABLE_HEADER_LINES=3
 TABLE_ROW_OVERLAP=1
+CONVERSATION_WINDOW_SIZE=10
 ```
 
 ---
@@ -397,6 +409,7 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 - [ ] 支持中文问题
 - [ ] 图表可视化（营收趋势、风险变化等）
 - [ ] 多轮对话功能
+- [ ] 增加 AI 交互Skills: 解释代码库、辅助setup
 
 ---
 
