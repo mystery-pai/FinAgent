@@ -40,6 +40,14 @@ class QueryRequest(BaseModel):
     question: str = Field(description="User question in Chinese or English")
     max_results: int = Field(default=5, description="Maximum number of results")
     include_citations: bool = Field(default=True, description="Include source citations")
+    session_id: Optional[str] = Field(default=None, description="Conversation session identifier")
+
+
+class ConversationTurn(BaseModel):
+    """Single turn in a conversation session"""
+
+    question: str = Field(description="User question")
+    answer: str = Field(description="Assistant answer")
 
 
 class Citation(BaseModel):
@@ -54,8 +62,13 @@ class Citation(BaseModel):
 class QueryResponse(BaseModel):
     """Query response with answer and citations"""
 
+    session_id: str = Field(description="Conversation session identifier")
     answer: str = Field(description="Generated answer")
     citations: List[Citation] = Field(default_factory=list, description="Source citations")
+    conversation_history: List[ConversationTurn] = Field(
+        default_factory=list,
+        description="Recent conversation turns",
+    )
     retrieval_debug: Optional[Dict[str, Any]] = Field(
         default=None, description="Debug information for retrieval process"
     )
