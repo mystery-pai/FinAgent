@@ -163,6 +163,25 @@ streamlit run ui/streamlit_app.py
 - `--no-translate --no-llm` 用于切回纯本地排障模式。
 - 脚本会优先复用当前环境里的 `http_proxy` / `https_proxy`，并避免 `all_proxy=socks5://...` 导致的初始化报错。
 
+### API curl 调用
+
+```bash
+# 1. Start FastAPI service
+./venv/bin/python -m app.api.main
+```
+
+```bash
+# 2. Call /query with curl
+curl -X POST "http://127.0.0.1:8000/query" \
+  -H "Content-Type: application/json" \
+  -d "{\"question\":\"Apple's cash flow 2025\",\"max_results\":10,\"include_citations\":true}"
+```
+
+说明：
+- 默认监听地址为 `http://127.0.0.1:8000`，可通过 `.env` 中的 `API_HOST` 和 `API_PORT` 调整。
+- `max_results` 对应检索条数，和 `scripts/debug_answer.py` 里的 `--top-k` 含义一致。
+- 如果要和 CLI 做结果对比，建议使用同一个问题，例如 `Apple's cash flow 2025`。
+
 ### 表格类问题排障策略
 
 对于 `cash flow`、`balance sheet`、`income statement` 这类表格型问题，优先按下面顺序排查：
@@ -342,6 +361,18 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 
 ## 📈 开发路线
 
+### 检索增强
+- [ ] **Rerank 增强**：引入重排序模型提升检索精度
+- [ ] **表格增强**
+  - 给 `_split_table()` 增加表头复用或轻量 overlap
+  - 现金流表等 section 尽量切成更少的 chunk（更大的 table chunk size）
+- [ ] **Chunk Refiner**：优化 chunk 边界，提升上下文完整性
+- [ ] **Metadata Enricher**：增强文档元数据，支持更精确的过滤
+
+### 评估体系
+- [ ] **RAG Metrics**：建立完整的检索生成评估指标体系
+
+### 功能扩展
 - [ ] 支持 SEC 文件在线下载
 - [ ] 添加更多公司（不仅 AAPL）
 - [ ] 支持中文问题
