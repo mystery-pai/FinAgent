@@ -76,6 +76,8 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
    - Prompt Engineering：约束模型基于证据回答
    - 引用生成：标注每个事实的来源
 
+> 📖 **详细架构文档**：查看 [ARCHITECTURE.md](ARCHITECTURE.md) 了解完整的系统架构、模块设计、数据流和实现细节。
+
 ---
 
 ## 🚀 快速开始
@@ -362,8 +364,35 @@ CONVERSATION_WINDOW_SIZE=10
 ### 运行评估
 
 ```bash
-python3 scripts/eval.py
+./venv/bin/python scripts/eval.py
 ```
+
+```bash
+# Only retrieval metrics
+./venv/bin/python scripts/eval.py --metrics hit_rate mrr --mode hybrid --top-k 5
+```
+
+```bash
+# Include RAGAS faithfulness
+./venv/bin/python scripts/eval.py --metrics hit_rate mrr faithfulness --output data/eval_results/latest.json
+```
+
+测试集格式见 `tests/eval_questions.json`，每条样例如下：
+
+```json
+{
+  "question": "Apple's cash flow for 2025",
+  "filters": {"year": 2025},
+  "expected_doc_ids": ["2025_27"],
+  "expected_chunk_ids": [],
+  "reference_answer": "2025 年苹果现金流量表应包含经营、投资和融资活动现金流量。"
+}
+```
+
+说明：
+- `hit_rate` 和 `mrr` 基于检索结果与 `expected_doc_ids` / `expected_chunk_ids` 的匹配计算。
+- `faithfulness` 使用 RAGAS 官方 metric，对系统生成答案和 `retrieved_contexts` 做评估。
+- `faithfulness` 需要已安装 `ragas`、`datasets`，并且当前 `.env` 中配置了可用的 DeepSeek 凭据。
 
 ---
 
