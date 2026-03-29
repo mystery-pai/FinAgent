@@ -124,6 +124,11 @@ English translation:"""
                 api_key=settings.deepseek_api_key,
                 base_url=settings.deepseek_base_url,
             )
+        elif settings.llm_provider == "ollama":
+            return OpenAI(
+                base_url=settings.ollama_base_url + "/v1",
+                api_key="ollama",
+            )
         return None
 
     def translate(self, chinese_query: str) -> str:
@@ -144,8 +149,13 @@ English translation:"""
             return chinese_query
 
         try:
+            model = (
+                settings.ollama_model
+                if settings.llm_provider == "ollama"
+                else "deepseek-chat"
+            )
             response = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model=model,
                 messages=[
                     {"role": "system", "content": "You are a financial translator."},
                     {"role": "user", "content": self.TRANSLATION_PROMPT.format(chinese_question=chinese_query)},
@@ -183,6 +193,12 @@ class AnswerGenerator:
             return OpenAI(
                 api_key=settings.deepseek_api_key,
                 base_url=settings.deepseek_base_url,
+            )
+        elif settings.llm_provider == "ollama":
+            # Ollama uses OpenAI-compatible API
+            return OpenAI(
+                base_url=settings.ollama_base_url + "/v1",
+                api_key="ollama",  # Required but not used by Ollama
             )
         logger.warning(f"No LLM client configured for provider: {settings.llm_provider}")
         return None
@@ -268,8 +284,13 @@ class AnswerGenerator:
             return f"{last_question} {translated_question}".strip()
 
         try:
+            model = (
+                settings.ollama_model
+                if settings.llm_provider == "ollama"
+                else "deepseek-chat"
+            )
             response = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model=model,
                 messages=[
                     {"role": "system", "content": "You rewrite follow-up questions for retrieval."},
                     {
@@ -338,8 +359,14 @@ class AnswerGenerator:
     def _generate_with_llm(self, prompt: str) -> str:
         """Generate answer using LLM"""
         try:
+            # Use configured model based on provider
+            model = (
+                settings.ollama_model
+                if settings.llm_provider == "ollama"
+                else "deepseek-chat"
+            )
             response = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model=model,
                 messages=[
                     {"role": "system", "content": self.templates.SYSTEM_TEMPLATE},
                     {"role": "user", "content": prompt},

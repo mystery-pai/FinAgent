@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str = Field(default="")
     deepseek_base_url: str = Field(default="https://api.deepseek.com")
     ollama_base_url: str = Field(default="http://localhost:11434")
-    ollama_model: str = Field(default="deepseek-coder:33b")
+    ollama_model: str = Field(default="qwen2.5:7b")
 
     # Embedding settings
     embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
