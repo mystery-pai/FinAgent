@@ -360,6 +360,13 @@ TABLE_ROW_OVERLAP=1
 CONVERSATION_WINDOW_SIZE=10
 ```
 
+> **验证状态说明**
+> - ✅ **DeepSeek 方式**：已验证可以正常工作，推荐使用
+> - ⚠️ **Ollama 方式**：代码已支持但暂未验证，使用时请确保：
+>   - Ollama 服务已启动（`ollama serve`）
+>   - 已下载对应模型（`ollama pull qwen2.5:7b`）
+>   - 网络连接正常（本地模型调用）
+
 ---
 
 ## 🧪 评估指南
