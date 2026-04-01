@@ -1,0 +1,42 @@
+[
+  {
+    "question": "Apple's cash flow for 2025",
+    "filters": {
+      "year": 2025
+    },
+    "expected_doc_ids": ["2025_27"],
+    "reference_answer": "2025 年苹果现金流量表应包含经营、投资和融资活动现金流量。"
+  },
+  {
+    "question": "What were Apple's main risks in 2025?",
+    "filters": {
+      "year": 2025
+    },
+    "expected_doc_ids": ["2025_3"],
+    "reference_answer": "答案应主要基于 2025 年 Item 1A Risk Factors。"
+  },
+  {
+    "question": "Summarize Apple's Item 1 business overview in 2025",
+    "filters": {
+      "year": 2025
+    },
+    "expected_doc_ids": ["2025_2"],
+    "reference_answer": "答案应主要基于 2025 年 Item 1 Business。"
+  },
+  {
+    "question": "欧洲委员会（European Commission）针对 DMA 调查对 Apple 作出了什么处罚决定？",
+    "filters": {
+      "year": 2025
+    },
+    "expected_doc_ids": ["2025_7"],
+    "reference_answer": "2025 年 4 月 23 日，委员会在针对《数字市场法案》(DMA) 第 5(4) 条的调查中，对 Apple 处以 5 亿欧元的罚款，并发布停止令，要求其移除防止开发者引导用户使用 App Store 之外其他分销渠道的技术和商业限制。数据来源: Item 3 - Legal Proceedings (Digital Markets Act Investigations)."
+  },
+  {
+    "question": "2025 财年大中华区（Greater China）的销售表现如何？主要受哪些产品影响？",
+    "filters": {
+      "year": 2025
+    },
+    "expected_doc_ids": ["2025_11"],
+    "reference_answer": "2025 财年大中华区的净销售额为 643.77 亿美元，较 2024 年下降了 4%。这一趋势主要是由于 iPhone 的销售额下降所致，但部分被 Mac 销售额的增长所抵消。数据来源: Item 7 - Management’s Discussion and Analysis (Segment Operating Performance)."
+  }
+]
