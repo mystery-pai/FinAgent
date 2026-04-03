@@ -2,6 +2,23 @@
 
 > 基于 RAG 架构的 Apple 10-K 财报智能分析系统
 
+## 📚 目录
+
+- [项目简介](#project-overview)
+- [技术架构](#architecture)
+- [快速开始](#quick-start)
+- [使用指南](#usage-guide)
+- [项目结构](#project-structure)
+- [配置说明](#configuration)
+- [评估指南](#evaluation)
+- [AI 协作说明](#ai-collaboration)
+- [常见问题](#faq)
+- [开发路线](#roadmap)
+- [版本历史](#version-history)
+- [许可证](#license)
+- [致谢](#acknowledgements)
+
+<a id="project-overview"></a>
 ## 🎯 项目简介
 
 Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系统。通过混合检索（BM25 + 向量搜索）和大语言模型，系统能够准确回答关于 Apple 财务状况、风险因素、业务表现等各类问题，并提供可追溯的引用来源。
@@ -23,6 +40,7 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 
 ---
 
+<a id="architecture"></a>
 ## 🏗️ 技术架构
 
 ### 系统架构图
@@ -93,6 +111,7 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 
 ---
 
+<a id="quick-start"></a>
 ## 🚀 快速开始
 
 ### 方式一：Docker 部署（推荐）
@@ -276,6 +295,7 @@ curl -X POST "http://127.0.0.1:8000/query" \
 
 ---
 
+<a id="usage-guide"></a>
 ## 📖 使用指南
 
 ### 示例问题
@@ -324,6 +344,7 @@ A: 结论：2025财年的总净销售额为4161.61亿美元。
 
 ---
 
+<a id="project-structure"></a>
 ## 📁 项目结构
 
 ```
@@ -362,6 +383,7 @@ fin-agent/
 
 ---
 
+<a id="configuration"></a>
 ## 🔧 配置说明
 
 ### 环境变量 (.env)
@@ -396,6 +418,7 @@ CONVERSATION_WINDOW_SIZE=10
 
 ---
 
+<a id="evaluation"></a>
 ## 🧪 评估指南
 
 ### 评估维度
@@ -447,6 +470,7 @@ CONVERSATION_WINDOW_SIZE=10
 
 ---
 
+<a id="ai-collaboration"></a>
 ## 🤖 AI 协作说明
 
 本项目使用 Claude Code 辅助开发，主要协作内容：
@@ -462,6 +486,7 @@ CONVERSATION_WINDOW_SIZE=10
 
 ---
 
+<a id="faq"></a>
 ## 🐛 常见问题
 
 **Q: 检索结果不准确怎么办？**
@@ -475,6 +500,7 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 
 ---
 
+<a id="roadmap"></a>
 ## 📈 开发路线
 
 ### 检索增强
@@ -527,6 +553,7 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 
 ---
 
+<a id="version-history"></a>
 ## 🕘 版本历史
 
 > 当前仓库尚未维护正式 Git Tag，以下版本按功能里程碑整理。
@@ -550,12 +577,14 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 
 ---
 
+<a id="license"></a>
 ## 📄 许可证
 
 MIT License
 
 ---
 
+<a id="acknowledgements"></a>
 ## 🙏 致谢
 
 - 数据来源：U.S. Securities and Exchange Commission (SEC)
