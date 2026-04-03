@@ -27,6 +27,19 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 
 ### 系统架构图
 
+**Excalidraw 草图**
+
+- Obsidian 文件：`docs/fin-agent-rag-flow.excalidraw.md`
+- 建议在 Obsidian 中切换到 Excalidraw View 查看，GitHub 里保留下面这份文字版摘要
+
+**处理流程摘要**
+
+1. 离线构建阶段：`data/raw/aapl_10k.json` 经过 `FinancialDataProcessor` 清洗和 `DocumentChunker` 分块，分别写入 `BM25 Index` 与 `ChromaDB`。
+2. 在线问答阶段：用户从 Streamlit 或 FastAPI 进入后，`ConversationManager` 先恢复最近 10 轮上下文。
+3. `AnswerGenerator` 负责中文查询翻译、追问改写，然后把检索查询交给 `HybridRetriever`。
+4. `HybridRetriever` 内部先做 `QueryParser` 解析，再分别走 `BM25Retriever` 和 `ChromaRetriever`，最后做 RRF 融合、元数据加权和现金流表相邻 chunk 扩展。
+5. 检索结果回到 `AnswerGenerator` 生成中文答案，并返回引用与调试信息。
+
 ```
 用户问题
     ↓
@@ -141,7 +154,7 @@ streamlit run ui/streamlit_app.py
 ./venv/bin/python -m app.api.main
 
 # 终端 2：启动 Streamlit UI
-streamlit run ui/streamlit_app.py
+./venv/bin/python streamlit run ui/streamlit_app.py
 ```
 
 ### 本地检索调试 CLI
@@ -184,6 +197,20 @@ streamlit run ui/streamlit_app.py
 - 默认行为尽量贴近 API：会使用配置里的翻译和回答模型。
 - `--no-translate --no-llm` 用于切回纯本地排障模式。
 - 脚本会优先复用当前环境里的 `http_proxy` / `https_proxy`，并避免 `all_proxy=socks5://...` 导致的初始化报错。
+
+### RAG 评估
+
+```bash
+# Retrieval only
+python3 scripts/eval.py --dataset tests/eval_questions.json --mode hybrid --metrics hit_rate mrr
+
+# Save JSON report
+python3 scripts/eval.py --dataset tests/eval_questions.json --mode hybrid --metrics hit_rate mrr --output data/eval_results/latest.json
+```
+
+说明：
+- 评测说明文档见 `docs/evaluation.md`
+- `faithfulness` 依赖 DeepSeek 和可用网络连接，排查检索问题时建议先只跑 `hit_rate` 和 `mrr`
 
 ### API curl 调用
 
@@ -463,9 +490,12 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 
 ### 功能扩展
 - [ ] 支持 SEC 文件在线下载
+- [ ] 联网搜索：支持补充最新市场信息、新闻和公开资料
 - [ ] 添加更多公司（不仅 AAPL）
-- [ ] 支持中文问题
-- [ ] 图表可视化（营收趋势、风险变化等）
+- [x] 支持中文问题
+- [ ] **Deepresearch 深度研究**
+  - 数据分析：自动提取多年度关键指标，完成同比、环比和趋势分析
+  - 数据图生成：自动生成营收、利润、现金流等可视化图表
 - [x] 多轮对话功能 ✅
 - [x] 增加 AI 交互Skills: 解释代码库、辅助setup ✅
 
@@ -494,6 +524,29 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
   - 检索智能体：专注信息召回
   - 分析智能体：负责数据解读
   - 综合智能体：整合生成最终答案
+
+---
+
+## 🕘 版本历史
+
+> 当前仓库尚未维护正式 Git Tag，以下版本按功能里程碑整理。
+
+### 1.0.2 - 2026/04/01
+
+- 【评估】新增评估问题集，用于 RAG 检索和生成效果验证
+- 【文档】补充 LLM Provider 验证状态，明确 DeepSeek 与 Ollama 的使用说明
+
+### 1.0.1 - 2026/03/29
+
+- 【模型】支持通过 Ollama 接入 Qwen 2.5 7B 本地模型
+
+### 1.0.0 - 2026/03/28
+
+- 【核心】完成 Apple 10-K RAG 问答主链路，支持 BM25 + 向量混合检索
+- 【表格】增强财务表格切分，支持表头复用与相邻 chunk 扩展
+- 【交互】支持 Streamlit UI、FastAPI API 与多轮对话
+- 【工程】支持 Docker 部署、索引自动构建，以及本地检索和问答调试 CLI
+- 【评估】新增评估模块、评估脚本和架构文档
 
 ---
 
