@@ -55,8 +55,8 @@ class Citation(BaseModel):
 
     year: int
     section_title: str
-    chunk_id: str
-    relevance_score: float
+    chunk_id: Optional[str] = None
+    relevance_score: Optional[float] = None
 
 
 class QueryResponse(BaseModel):
@@ -94,3 +94,106 @@ class ReportResponse(BaseModel):
     summary: str
     key_findings: List[str]
     citations: List[Citation]
+
+
+# ==================== Visualization Models ====================
+
+
+class ChartSeries(BaseModel):
+    """Single data series for chart"""
+    name: str = Field(description="Series name (e.g., 'Revenue', 'Net Income')")
+    values: List[float] = Field(description="Data values")
+    unit: Optional[str] = Field(None, description="Unit (e.g., 'Million USD', 'Billion USD')")
+
+
+class ChartDataSchema(BaseModel):
+    """
+    Structured chart data extracted from documents
+
+    This schema is used for LLM Function Calling to ensure structured output
+    """
+    title: str = Field(description="Chart title")
+    x_label: str = Field(description="X-axis label (e.g., 'Year', 'Quarter')")
+    y_label: str = Field(description="Y-axis label (e.g., 'Revenue', 'Amount')")
+    x_values: List[Any] = Field(description="X-axis values (e.g., [2023, 2024, 2025])")
+    series: List[ChartSeries] = Field(description="Data series")
+    chart_type_hint: Optional[str] = Field(
+        None,
+        description="Suggested chart type based on data (line, bar, pie, scatter)"
+    )
+    data_source: Optional[str] = Field(
+        None,
+        description="Data source citation (e.g., '10-K 2024, Item 8')"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "title": "Apple Revenue Trend 2023-2025",
+                "x_label": "Year",
+                "y_label": "Revenue",
+                "x_values": [2023, 2024, 2025],
+                "series": [
+                    {
+                        "name": "Revenue",
+                        "values": [383.285, 391.035, 401.610],
+                        "unit": "Billion USD"
+                    }
+                ],
+                "chart_type_hint": "line",
+                "data_source": "10-K Reports, Item 8"
+            }
+        }
+
+
+class VisualizationRequest(BaseModel):
+    """Request for visualization endpoint"""
+    question: str = Field(description="User question for visualization")
+    chart_type: str = Field(
+        default="auto",
+        description="Chart type: auto, line, bar, pie, grouped_bar"
+    )
+    engine: str = Field(
+        default="plotly",
+        description="Visualization engine: plotly or echarts"
+    )
+    session_id: Optional[str] = Field(
+        None,
+        description="Conversation session ID"
+    )
+    max_results: int = Field(
+        default=10,
+        ge=1, le=50,
+        description="Max documents to retrieve"
+    )
+
+
+class VisualizationResponse(BaseModel):
+    """Response from visualization endpoint"""
+    session_id: str
+    chart_html: str = Field(description="Chart HTML for embedding")
+    chart_json: Dict[str, Any] = Field(description="Chart JSON for programmatic use")
+    chart_data: Dict[str, Any] = Field(description="Raw extracted data")
+    analysis: str = Field(description="Text analysis of the data")
+    citations: List[Citation] = Field(description="Source citations")
+    chart_type: str = Field(description="Actual chart type used")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional metadata (retrieval debug, etc.)"
+    )
+
+
+class IndexBuildRequest(BaseModel):
+    """Request to build search indices"""
+    force_rebuild: bool = Field(
+        default=False,
+        description="Force rebuild even if indices exist"
+    )
+
+
+class IndexStatus(BaseModel):
+    """Status of search indices"""
+    indexed: bool = Field(description="Whether documents are indexed")
+    document_count: int = Field(description="Number of indexed documents")
+    bm25_indexed: bool = Field(description="BM25 index status")
+    chroma_indexed: bool = Field(description="ChromaDB index status")

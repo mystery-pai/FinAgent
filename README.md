@@ -19,6 +19,7 @@
 - [致谢](#acknowledgements)
 
 <a id="project-overview"></a>
+
 ## 🎯 项目简介
 
 Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系统。通过混合检索（BM25 + 向量搜索）和大语言模型，系统能够准确回答关于 Apple 财务状况、风险因素、业务表现等各类问题，并提供可追溯的引用来源。
@@ -46,9 +47,7 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 ### 系统架构图
 
 **Excalidraw 草图**
-
-- Obsidian 文件：`docs/fin-agent-rag-flow.excalidraw.md`
-- 建议在 Obsidian 中切换到 Excalidraw View 查看，GitHub 里保留下面这份文字版摘要
+![多轮对话演示](docs/images/flow-excalidraw.png)
 
 **处理流程摘要**
 

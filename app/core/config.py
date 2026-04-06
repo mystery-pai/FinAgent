@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     table_row_overlap: int = Field(default=1)
     conversation_window_size: int = Field(default=10)
 
+    # Visualization settings
+    visualization_enabled: bool = Field(default=True)
+    default_chart_engine: str = Field(default="plotly")
+    max_chart_data_points: int = Field(default=1000)
+    chart_default_width: int = Field(default=800)
+    chart_default_height: int = Field(default=600)
+
     # API settings
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000)

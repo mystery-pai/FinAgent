@@ -31,6 +31,29 @@
 
 ## 系统架构图
 
+### Excalidraw 草图
+
+- Obsidian 文件：`docs/fin-agent-rag-flow.excalidraw.md`
+- 这张图把项目拆成三层：入口层、在线问答主链、离线索引构建与存储层
+
+### 处理流程总览
+
+**离线索引构建**
+
+1. `scripts/build_index.py` 或 `/index/build` 触发索引构建。
+2. `FinancialDataProcessor.process_file()` 读取 `data/raw/aapl_10k.json`，清洗文本并补齐标准化元数据。
+3. `DocumentChunker` 按正文和表格两套策略切块，生成 `DocumentChunk`。
+4. `BM25Retriever.build_index()` 写入本地 BM25 索引，`ChromaRetriever.build_index()` 写入 ChromaDB 与向量元数据。
+
+**在线问答**
+
+1. Streamlit UI 或 FastAPI `/query` 接收问题。
+2. `ConversationManager` 按 `session_id` 恢复最近 10 轮上下文。
+3. `AnswerGenerator.build_retrieval_query()` 负责中文转英文和追问改写。
+4. `HybridRetriever.retrieve()` 解析年份、主题、问题类型后，并行调用 BM25 与向量检索。
+5. 混合检索结果经过 RRF 融合、metadata boosting，以及现金流表命中时的相邻 chunk 扩展。
+6. `AnswerGenerator.generate()` 基于检索证据生成中文答案，并附带 citations。
+
 ```mermaid
 graph TB
     subgraph "用户界面层"

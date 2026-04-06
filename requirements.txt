@@ -25,6 +25,10 @@ nltk>=3.8.1
 # UI
 streamlit>=1.31.0
 
+# Visualization
+plotly>=5.18.0
+kaleido>=0.2.1  # For static image export (optional)
+
 # LLM client
 openai>=1.12.0  # For DeepSeek API (OpenAI-compatible)
 requests>=2.31.0
