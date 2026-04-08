@@ -9,10 +9,12 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
+import streamlit.components.v1 as st_components
 from loguru import logger
 
 from app.core.config import settings
 from app.schemas.models import ConversationTurn
+from app.ui.workflows import execute_visualization_request
 
 # Configure page
 st.set_page_config(
@@ -59,6 +61,8 @@ def init_session_state():
         st.session_state.retriever = None
     if "generator" not in st.session_state:
         st.session_state.generator = None
+    if "visualization_agent" not in st.session_state:
+        st.session_state.visualization_agent = None
     if "query_history" not in st.session_state:
         st.session_state.query_history = []
     if "conversation_turns" not in st.session_state:
@@ -70,21 +74,26 @@ def init_session_state():
 def load_system_components():
     """Load retriever and generator"""
     try:
+        from app.agents.base import AgentConfig
+        from app.agents.visualization_agent import VisualizationAgent
         from app.retrieve.hybrid_retriever import HybridRetriever
         from app.generate.answer_generator import AnswerGenerator
-        from app.core.config import settings
 
-        # Initialize retriever
         retriever = HybridRetriever()
-
-        # Initialize generator
         generator = AnswerGenerator()
+        visualization_agent = VisualizationAgent(
+            config=AgentConfig(
+                name="visualization",
+                description="Visualization agent for Streamlit UI",
+            ),
+            retriever=retriever,
+        )
 
-        return retriever, generator
+        return retriever, generator, visualization_agent
     except Exception as e:
         st.error(f"Failed to load system components: {str(e)}")
         logger.error(f"Error loading components: {e}")
-        return None, None
+        return None, None, None
 
 
 def render_header():
@@ -99,10 +108,25 @@ def render_sidebar():
     with st.sidebar:
         st.header("⚙️ Settings")
 
+        interaction_mode = st.radio(
+            "Mode",
+            options=["qa", "visualization"],
+            format_func=lambda value: "问答" if value == "qa" else "可视化",
+        )
+
         # Retrieval settings
         st.subheader("Retrieval")
         top_k = st.slider("Top K Results", min_value=3, max_value=10, value=5)
         use_hybrid = st.checkbox("Use Hybrid Retrieval", value=True)
+
+        chart_type = "auto"
+        if interaction_mode == "visualization":
+            st.subheader("Visualization")
+            chart_type = st.selectbox(
+                "Chart Type",
+                options=["auto", "line", "bar", "grouped_bar", "pie"],
+                index=0,
+            )
 
         # Year filter
         st.subheader("Filters")
@@ -136,7 +160,7 @@ def render_sidebar():
             st.session_state.session_id = uuid4().hex
             st.rerun()
 
-        return top_k, use_hybrid, year_filter, llm_provider
+        return interaction_mode, top_k, use_hybrid, year_filter, llm_provider, chart_type
 
 
 def render_citations(citations: list, key_prefix: str):
@@ -191,6 +215,9 @@ def render_conversation():
             st.markdown(turn["question"])
 
         with st.chat_message("assistant"):
+            if turn.get("mode") == "visualization" and turn.get("chart_html"):
+                st_components.html(turn["chart_html"], height=640, scrolling=True)
+                st.caption(f"Chart Type: {turn.get('chart_type', 'unknown')}")
             st.markdown(turn["answer"])
             render_citations(turn.get("citations", []), key_prefix=f"turn_{index}")
             render_debug_info(turn.get("debug_info"), key_prefix=f"turn_{index}")
@@ -219,7 +246,11 @@ def main():
     # Load components
     if st.session_state.retriever is None:
         with st.spinner("Loading system components..."):
-            st.session_state.retriever, st.session_state.generator = load_system_components()
+            (
+                st.session_state.retriever,
+                st.session_state.generator,
+                st.session_state.visualization_agent,
+            ) = load_system_components()
 
     if st.session_state.retriever is None:
         st.error("Failed to initialize system. Please check your configuration.")
@@ -227,7 +258,7 @@ def main():
 
     # Render UI
     render_header()
-    top_k, use_hybrid, year_filter, llm_provider = render_sidebar()
+    interaction_mode, top_k, use_hybrid, year_filter, llm_provider, chart_type = render_sidebar()
     render_conversation()
 
     # Initialize example query in session state
@@ -238,25 +269,32 @@ def main():
     col1, col2 = st.columns([4, 1])
 
     with col1:
+        label = "可视化财报数据..." if interaction_mode == "visualization" else "Ask a question about AAPL 10-K..."
+        placeholder = (
+            "e.g., 显示苹果 2023 到 2025 年营收趋势"
+            if interaction_mode == "visualization"
+            else "e.g., What were Apple's main risks in 2025?"
+        )
         # Use example query if set, otherwise use current input value
         if st.session_state.example_query:
             query = st.text_input(
-                "Ask a question about AAPL 10-K...",
+                label,
                 value=st.session_state.example_query,
-                placeholder="e.g., What were Apple's main risks in 2025?",
+                placeholder=placeholder,
                 key="query_input"
             )
             # Clear example query after using it
             st.session_state.example_query = ""
         else:
             query = st.text_input(
-                "Ask a question about AAPL 10-K...",
-                placeholder="e.g., What were Apple's main risks in 2025?",
+                label,
+                placeholder=placeholder,
                 key="query_input"
             )
 
     with col2:
-        submitted = st.button("Search", type="primary", use_container_width=True)
+        button_label = "Visualize" if interaction_mode == "visualization" else "Search"
+        submitted = st.button(button_label, type="primary", use_container_width=True)
 
     # Example queries
     with st.expander("💡 Example Queries", expanded=False):
@@ -297,67 +335,77 @@ def main():
             for turn in st.session_state.conversation_turns
         ]
 
-        # Show progress
-        with st.spinner("Retrieving relevant information..."):
-            try:
-                retrieval_query = st.session_state.generator.build_retrieval_query(
-                    query,
-                    conversation_history=conversation_history,
-                )
-
-                # Build filters
-                filters = {}
-                if year_filter:
-                    filters["year"] = year_filter
-
-                # Retrieve
-                retrieved_docs, debug_info = st.session_state.retriever.retrieve(
-                    query=retrieval_query,
-                    k=top_k,
-                    filters=filters if filters else None
-                )
-                results = retrieved_docs
-
-                if not results:
-                    st.warning("No relevant information found. Try rephrasing your query.")
-                    st.stop()
-
-                # Generate answer
-                with st.spinner("Generating answer..."):
-                    answer, citations = st.session_state.generator.generate(
+        try:
+            if interaction_mode == "visualization":
+                with st.spinner("Generating visualization..."):
+                    turn = execute_visualization_request(
+                        agent=st.session_state.visualization_agent,
                         question=query,
-                        retrieved_docs=results,
-                        query_type=debug_info.get("query_type", "factual"),
-                        debug_info=debug_info,
+                        session_id=st.session_state.session_id,
+                        chart_type=chart_type,
+                        max_results=top_k,
+                        year_filter=year_filter,
+                    )
+                    st.session_state.conversation_turns.append(turn)
+            else:
+                with st.spinner("Retrieving relevant information..."):
+                    retrieval_query = st.session_state.generator.build_retrieval_query(
+                        query,
                         conversation_history=conversation_history,
                     )
 
-                    turn_debug = {
-                        "query": query,
-                        "retrieval_query": retrieval_query,
-                        "session_id": st.session_state.session_id,
-                        "conversation_turn_count": len(conversation_history),
-                        "top_k": top_k,
-                        "year_filter": year_filter,
-                        "retrieved_count": len(results),
-                        **debug_info
-                    }
-                    st.session_state.conversation_turns.append(
-                        {
-                            "question": query,
-                            "answer": answer,
-                            "citations": citations,
-                            "debug_info": turn_debug,
-                        }
-                    )
-                    st.session_state.conversation_turns = st.session_state.conversation_turns[
-                        -settings.conversation_window_size :
-                    ]
-                    st.rerun()
+                    filters = {}
+                    if year_filter:
+                        filters["year"] = year_filter
 
-            except Exception as e:
-                st.error(f"Error processing query: {str(e)}")
-                logger.error(f"Query processing error: {e}")
+                    retrieved_docs, debug_info = st.session_state.retriever.retrieve(
+                        query=retrieval_query,
+                        k=top_k,
+                        filters=filters if filters else None
+                    )
+                    results = retrieved_docs
+
+                    if not results:
+                        st.warning("No relevant information found. Try rephrasing your query.")
+                        st.stop()
+
+                    with st.spinner("Generating answer..."):
+                        answer, citations = st.session_state.generator.generate(
+                            question=query,
+                            retrieved_docs=results,
+                            query_type=debug_info.get("query_type", "factual"),
+                            debug_info=debug_info,
+                            conversation_history=conversation_history,
+                        )
+
+                        turn_debug = {
+                            "query": query,
+                            "retrieval_query": retrieval_query,
+                            "session_id": st.session_state.session_id,
+                            "conversation_turn_count": len(conversation_history),
+                            "top_k": top_k,
+                            "year_filter": year_filter,
+                            "retrieved_count": len(results),
+                            **debug_info
+                        }
+                        st.session_state.conversation_turns.append(
+                            {
+                                "mode": "qa",
+                                "question": query,
+                                "answer": answer,
+                                "citations": citations,
+                                "debug_info": turn_debug,
+                            }
+                        )
+
+            st.session_state.conversation_turns = st.session_state.conversation_turns[
+                -settings.conversation_window_size :
+            ]
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Error processing query: {str(e)}")
+            logger.error(f"Query processing error: {e}")
 
     # Render query history
     render_query_history()

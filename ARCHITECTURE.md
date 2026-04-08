@@ -2,14 +2,15 @@
 
 ## 项目概述
 
-**Fin-Agent** 是一个基于 RAG（Retrieval-Augmented Generation）架构的智能问答系统，专门用于分析 Apple Inc. 的 10-K 财报文档。
+**Fin-Agent** 是一个基于 RAG（Retrieval-Augmented Generation）和多智能体可视化流水线的财报分析系统，专门用于分析 Apple Inc. 的 10-K 财报文档。
 
 ### 核心价值主张
 
 - **混合检索**：结合 BM25 关键词匹配和向量语义搜索
 - **可追溯引用**：每个答案都标注来源（年份 + Section）
 - **多轮对话**：支持最多保留 10 轮对话历史
-- **本地部署**：所有组件均可本地运行
+- **数据可视化**：支持从财报文本中提取结构化数值并生成 Plotly 图表
+- **本地优先**：检索、问答、UI、API 和调试脚本都可本地运行
 
 ---
 
@@ -23,6 +24,7 @@
 | **Embedding 模型** | bge-small-en-v1.5 | - |
 | **关键词检索** | bm25s | 0.1.6+ |
 | **LLM** | DeepSeek API / Ollama | - |
+| **可视化** | Plotly | 5.18.0+ |
 | **数据模型** | Pydantic | 2.5.3+ |
 | **配置管理** | pydantic-settings | 2.1.0+ |
 | **日志** | loguru | 0.7.2+ |
@@ -47,12 +49,20 @@
 
 **在线问答**
 
-1. Streamlit UI 或 FastAPI `/query` 接收问题。
+1. Streamlit UI 本地调用检索与问答组件，或由 FastAPI `/query` 提供程序化访问。
 2. `ConversationManager` 按 `session_id` 恢复最近 10 轮上下文。
 3. `AnswerGenerator.build_retrieval_query()` 负责中文转英文和追问改写。
 4. `HybridRetriever.retrieve()` 解析年份、主题、问题类型后，并行调用 BM25 与向量检索。
 5. 混合检索结果经过 RRF 融合、metadata boosting，以及现金流表命中时的相邻 chunk 扩展。
 6. `AnswerGenerator.generate()` 基于检索证据生成中文答案，并附带 citations。
+
+**在线可视化**
+
+1. Streamlit UI 的“可视化”模式直接调用 `VisualizationAgent`，FastAPI 则通过 `/visualize` 暴露同一能力。
+2. `VisualizationAgent` 复用 `HybridRetriever` 获取相关财报片段。
+3. `DataExtractor` 使用 LLM Function Calling 抽取结构化数据。
+4. `ChartGenerator` 生成 Plotly Figure，并导出 `chart_html` / `chart_json`。
+5. Agent 同时生成确定性分析文本，并返回 citations 与调试信息。
 
 ```mermaid
 graph TB
@@ -65,6 +75,9 @@ graph TB
         CM[ConversationManager]
         AG[AnswerGenerator]
         QT[QueryTranslator]
+        VA[VisualizationAgent]
+        DE[DataExtractor]
+        CG[ChartGenerator]
     end
 
     subgraph "检索层"
@@ -86,16 +99,23 @@ graph TB
         Raw[(Raw JSON)]
     end
 
-    UI --> API
+    UI --> CM
+    UI --> AG
+    UI --> HR
+    UI --> VA
     API --> CM
     API --> AG
     API --> HR
+    API --> VA
 
     HR --> QP
     HR --> BR
     HR --> CR
 
     AG --> QT
+    VA --> DE
+    VA --> CG
+    VA --> HR
 
     BR --> BM25
     CR --> Chroma
@@ -123,6 +143,11 @@ graph TB
 ```
 fin-agent/
 ├── app/
+│   ├── agents/                 # 多智能体模块
+│   │   ├── base.py            # Agent 抽象基类
+│   │   ├── router.py          # 意图路由
+│   │   ├── orchestrator.py    # Agent 编排器
+│   │   └── visualization_agent.py # 可视化 Agent
 │   ├── api/                    # FastAPI 路由层
 │   │   └── main.py            # API 端点定义
 │   ├── core/                   # 核心配置
@@ -140,6 +165,11 @@ fin-agent/
 │   │   └── answer_generator.py # LLM 答案生成器
 │   ├── schemas/                # 数据模型
 │   │   └── models.py          # Pydantic 模型定义
+│   ├── tools/                  # 可视化工具
+│   │   ├── data_extractor.py  # LLM 抽数工具
+│   │   └── chart_generator.py # Plotly 图表生成器
+│   ├── ui/                     # UI/CLI 共用工作流
+│   │   └── workflows.py       # 可视化工作流辅助函数
 │   └── eval/                   # 评估模块
 │       └── ragas_evaluator.py # RAGAS 评估器
 ├── ui/
@@ -154,6 +184,7 @@ fin-agent/
 │   ├── build_index.py        # 构建索引
 │   ├── debug_retrieve.py     # 检索调试工具
 │   ├── debug_answer.py       # 问答调试工具
+│   ├── debug_visualize.py    # 可视化调试工具
 │   └── eval.py               # 评估脚本
 ├── requirements.txt
 ├── Dockerfile
@@ -421,6 +452,7 @@ class Citation(BaseModel):
 | `/index/status` | GET | 索引状态查询 |
 | `/index/build` | POST | 构建索引 |
 | `/query` | POST | 问答查询 |
+| `/visualize` | POST | 生成图表与分析 |
 | `/report` | POST | 生成报告 |
 
 **生命周期管理**：
@@ -433,6 +465,9 @@ async def lifespan(app: FastAPI):
     components["answer_generator"] = AnswerGenerator()
     components["conversation_manager"] = ConversationManager()
     components["hybrid_retriever"] = HybridRetriever(...)
+    components["router_agent"] = RouterAgent(...)
+    components["visualization_agent"] = VisualizationAgent(...)
+    components["orchestrator"] = AgentOrchestrator(...)
     yield
     # Shutdown: 清理资源
 ```
@@ -459,6 +494,33 @@ sequenceDiagram
     API-->>Client: QueryResponse
 ```
 
+**`/visualize` 端点处理流程**：
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant CM as ConversationManager
+    participant Orchestrator
+    participant VA as VisualizationAgent
+    participant HR as HybridRetriever
+    participant DE as DataExtractor
+    participant CG as ChartGenerator
+
+    Client->>API: POST /visualize
+    API->>CM: ensure_session(session_id)
+    API->>Orchestrator: execute_visualization(...)
+    Orchestrator->>VA: execute(...)
+    VA->>HR: retrieve(question, k, filters)
+    HR-->>VA: retrieved_docs, debug_info
+    VA->>DE: extract(question, docs)
+    DE-->>VA: ChartDataSchema
+    VA->>CG: generate(chart_data, chart_type)
+    CG-->>VA: Plotly Figure
+    VA-->>API: chart_html / chart_json / analysis / citations
+    API->>CM: append_turn(session_id, question, analysis)
+    API-->>Client: VisualizationResponse
+```
+
 ---
 
 ### 7. 前端界面 (`ui/streamlit_app.py`)
@@ -468,6 +530,7 @@ sequenceDiagram
 **主要组件**：
 - `init_session_state()` - 初始化会话状态
 - `load_system_components()` - 加载检索器和生成器
+- `VisualizationAgent` - Streamlit 内直接复用的可视化执行入口
 - `render_header()` - 渲染页面头部
 - `render_sidebar()` - 渲染设置侧边栏
 - `render_conversation()` - 渲染对话历史
@@ -475,10 +538,12 @@ sequenceDiagram
 - `render_debug_info()` - 渲染调试信息
 
 **侧边栏设置**：
+- Mode（问答 / 可视化）
 - Top K Results (3-10)
 - Use Hybrid Retrieval
 - Year Filter (None/2020-2025)
 - LLM Provider (deepseek/ollama)
+- Chart Type（仅可视化模式显示）
 - Clear Conversation 按钮
 
 **示例查询**：
@@ -499,7 +564,6 @@ sequenceDiagram
 sequenceDiagram
     participant U as User
     participant UI as Streamlit UI
-    participant API as FastAPI
     participant CM as ConversationManager
     participant QT as QueryTranslator
     participant QP as QueryParser
@@ -510,20 +574,15 @@ sequenceDiagram
     participant LLM as DeepSeek API
 
     U->>UI: 输入问题
-    UI->>API: POST /query
-    API->>CM: ensure_session(session_id)
-    CM-->>API: session_id
-    API->>CM: get_history(session_id)
-    CM-->>API: conversation_history
-
-    API->>AG: build_retrieval_query()
+    UI->>CM: get local conversation history
+    UI->>AG: build_retrieval_query()
     AG->>QT: translate(query)
     QT-->>AG: translated_query
     AG->>LLM: rewrite query (if follow-up)
     LLM-->>AG: standalone_query
-    AG-->>API: retrieval_query
+    AG-->>UI: retrieval_query
 
-    API->>HR: retrieve(query, k)
+    UI->>HR: retrieve(query, k)
     HR->>QP: parse(query)
     QP-->>HR: parsed_query
     par Parallel Retrieval
@@ -536,17 +595,45 @@ sequenceDiagram
     HR->>HR: RRF Fusion
     HR->>HR: Metadata Boosting
     HR->>HR: Adjacent Chunk Expansion
-    HR-->>API: retrieved_docs, debug_info
+    HR-->>UI: retrieved_docs, debug_info
 
-    API->>AG: generate(question, docs, history)
+    UI->>AG: generate(question, docs, history)
     AG->>LLM: chat.completions.create()
     LLM-->>AG: answer
     AG->>AG: extract_citations()
-    AG-->>API: answer, citations
+    AG-->>UI: answer, citations
 
-    API->>CM: append_turn(session_id, q, a)
-    API-->>UI: QueryResponse
+    UI->>CM: append_turn(session_id, q, a)
     UI-->>U: 显示答案 + 引用
+```
+
+### 完整可视化流程
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as Streamlit UI / CLI / API
+    participant VA as VisualizationAgent
+    participant HR as HybridRetriever
+    participant QP as QueryParser
+    participant DE as DataExtractor
+    participant LLM as DeepSeek API
+    participant CG as ChartGenerator
+
+    U->>UI: 输入可视化问题
+    UI->>VA: execute(question, chart_type, filters)
+    VA->>HR: retrieve(query, k, filters)
+    HR->>QP: parse(query)
+    QP-->>HR: parsed_query
+    HR-->>VA: retrieved_docs, debug_info
+    VA->>DE: extract(question, docs)
+    DE->>LLM: function calling
+    LLM-->>DE: structured chart data
+    DE-->>VA: ChartDataSchema
+    VA->>CG: generate(chart_data, chart_type)
+    CG-->>VA: Plotly Figure
+    VA-->>UI: chart_html / chart_json / analysis / citations
+    UI-->>U: 显示图表 + 分析
 ```
 
 ---
@@ -596,7 +683,7 @@ components: Dict[str, Any] = {}  # 全局组件容器
 
 ### 4. 命令模式 (Command Pattern)
 
-**应用场景**：API 端点封装
+**应用场景**：API 端点封装与 CLI 调试入口
 
 ```python
 # app/api/main.py
@@ -829,7 +916,7 @@ CONVERSATION_WINDOW_SIZE=10
 
 - [ ] 支持 SEC 文件在线下载
 - [ ] 添加更多公司（不仅 AAPL）
-- [ ] 图表可视化（营收趋势、风险变化）
+- [x] 图表可视化（营收趋势、风险变化）
 - [ ] 支持多语言
 
 ---
@@ -843,5 +930,5 @@ CONVERSATION_WINDOW_SIZE=10
 
 ---
 
-**文档版本**：1.0
-**最后更新**：2026-03-28
+**文档版本**：1.1
+**最后更新**：2026-04-08

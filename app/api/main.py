@@ -9,7 +9,18 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.schemas.models import QueryRequest, QueryResponse, ReportRequest, ReportResponse
+from app.agents.base import AgentConfig
+from app.agents.orchestrator import AgentOrchestrator
+from app.agents.router import RouterAgent
+from app.agents.visualization_agent import VisualizationAgent
+from app.schemas.models import (
+    QueryRequest,
+    QueryResponse,
+    ReportRequest,
+    ReportResponse,
+    VisualizationRequest,
+    VisualizationResponse,
+)
 from app.ingest.preprocessor import FinancialDataProcessor
 from app.retrieve.bm25_retriever import BM25Retriever
 from app.retrieve.chroma_retriever import ChromaRetriever
@@ -17,6 +28,8 @@ from app.retrieve.hybrid_retriever import HybridRetriever
 from app.generate.answer_generator import AnswerGenerator
 from app.core.config import settings
 from app.core.conversation import ConversationManager
+from app.tools.chart_generator import ChartGenerator
+from app.tools.data_extractor import DataExtractor
 
 # Configure logging
 logging.basicConfig(
@@ -43,6 +56,25 @@ async def lifespan(app: FastAPI):
         components["hybrid_retriever"] = HybridRetriever(
             bm25_retriever=components["bm25_retriever"],
             chroma_retriever=components["chroma_retriever"],
+        )
+        components["router_agent"] = RouterAgent(
+            config=AgentConfig(
+                name="router",
+                description="Route questions to the appropriate agent",
+            )
+        )
+        components["visualization_agent"] = VisualizationAgent(
+            config=AgentConfig(
+                name="visualization",
+                description="Generate financial visualizations from retrieved documents",
+            ),
+            retriever=components["hybrid_retriever"],
+            data_extractor=DataExtractor(),
+            chart_generator=ChartGenerator(),
+        )
+        components["orchestrator"] = AgentOrchestrator(
+            router=components["router_agent"],
+            visualization_agent=components["visualization_agent"],
         )
 
         logger.info("Components initialized successfully")
@@ -96,6 +128,8 @@ async def root():
             "index": "/index",
             "status": "/index/status",
             "query": "/query",
+            "visualize": "/visualize",
+            "report": "/report",
             "health": "/health",
         }
     }
@@ -310,6 +344,79 @@ async def generate_report(request: ReportRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating report: {e}"
+        )
+
+
+@app.post("/visualize", response_model=VisualizationResponse)
+async def visualize(request: VisualizationRequest):
+    """Generate a chart and analysis for a visualization request."""
+    try:
+        if request.engine != "plotly":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only plotly engine is currently supported",
+            )
+
+        orchestrator = components.get("orchestrator")
+        conversation_manager = components.get("conversation_manager")
+
+        if not orchestrator or not conversation_manager:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Visualization components are not ready",
+            )
+
+        session_id = conversation_manager.ensure_session(request.session_id)
+        result = await orchestrator.execute_visualization(
+            question=request.question,
+            chart_type=request.chart_type,
+            session_id=session_id,
+            max_results=request.max_results,
+            engine=request.engine,
+        )
+
+        if not result.success:
+            if result.error == "No relevant documents found for visualization":
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=result.error,
+                )
+
+            if result.error and "Unsupported" in result.error:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=result.error,
+                )
+
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result.error or "Visualization failed",
+            )
+
+        conversation_manager.append_turn(
+            session_id,
+            request.question,
+            result.data["analysis"],
+        )
+
+        return VisualizationResponse(
+            session_id=session_id,
+            chart_html=result.data["chart_html"],
+            chart_json=result.data["chart_json"],
+            chart_data=result.data["chart_data"],
+            analysis=result.data["analysis"],
+            citations=result.data["citations"],
+            chart_type=result.data["chart_type"],
+            metadata=result.data.get("metadata", result.metadata),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating visualization: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating visualization: {e}"
         )
 
 

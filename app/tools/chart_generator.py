@@ -46,9 +46,8 @@ class ChartGenerator:
         logger.info(f"Generating chart: {data.title}, type={chart_type}")
 
         # Auto-detect chart type if needed
-        if chart_type == "auto":
-            chart_type = self._detect_chart_type(data)
-            logger.info(f"Auto-detected chart type: {chart_type}")
+        chart_type = self.resolve_chart_type(data, chart_type)
+        logger.info(f"Resolved chart type: {chart_type}")
 
         # Route to specific generator
         if chart_type == "line":
@@ -66,6 +65,16 @@ class ChartGenerator:
         self._apply_common_layout(fig, data)
 
         return fig
+
+    def resolve_chart_type(
+        self,
+        data: ChartDataSchema,
+        chart_type: Literal["line", "bar", "grouped_bar", "pie", "auto"] = "auto",
+    ) -> str:
+        """Resolve the chart type before figure generation."""
+        if chart_type != "auto":
+            return chart_type
+        return self._detect_chart_type(data)
 
     def _detect_chart_type(self, data: ChartDataSchema) -> str:
         """

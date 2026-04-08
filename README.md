@@ -1,4 +1,4 @@
-# 📊 Fin-Agent - AAPL 10-K 智能问答系统
+# 📊 Fin-Agent - AAPL 10-K 智能问答与可视化系统
 
 > 基于 RAG 架构的 Apple 10-K 财报智能分析系统
 
@@ -22,7 +22,7 @@
 
 ## 🎯 项目简介
 
-Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系统。通过混合检索（BM25 + 向量搜索）和大语言模型，系统能够准确回答关于 Apple 财务状况、风险因素、业务表现等各类问题，并提供可追溯的引用来源。
+Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答与可视化系统。通过混合检索（BM25 + 向量搜索）、多轮对话管理、多智能体可视化流水线和大语言模型，系统能够回答关于 Apple 财务状况、风险因素、业务表现等问题，并支持从财报文本中提取结构化数据生成交互式图表。
 
 ### 解决的问题
 
@@ -36,7 +36,9 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 - ✅ **可追溯引用**：每个答案都标注来源（年份 + Section）
 - ✅ **跨年分析**：支持对比不同年份的数据变化
 - ✅ **多轮对话**：按会话保留最近 10 轮问答上下文
-- ✅ **本地部署**：所有组件均可本地运行，无需云服务
+- ✅ **数据可视化**：支持生成营收、利润、现金流等 Plotly 图表
+- ✅ **多入口验证**：支持 Streamlit UI、FastAPI API 与本地 CLI 调试
+- ✅ **本地优先**：检索、问答、UI、API 和调试脚本都可本地运行
 - ✅ **容器化**：Docker 一键部署开箱即用
 
 ---
@@ -53,9 +55,10 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 
 1. 离线构建阶段：`data/raw/aapl_10k.json` 经过 `FinancialDataProcessor` 清洗和 `DocumentChunker` 分块，分别写入 `BM25 Index` 与 `ChromaDB`。
 2. 在线问答阶段：用户从 Streamlit 或 FastAPI 进入后，`ConversationManager` 先恢复最近 10 轮上下文。
-3. `AnswerGenerator` 负责中文查询翻译、追问改写，然后把检索查询交给 `HybridRetriever`。
-4. `HybridRetriever` 内部先做 `QueryParser` 解析，再分别走 `BM25Retriever` 和 `ChromaRetriever`，最后做 RRF 融合、元数据加权和现金流表相邻 chunk 扩展。
-5. 检索结果回到 `AnswerGenerator` 生成中文答案，并返回引用与调试信息。
+3. 问答链路中，`AnswerGenerator` 负责中文查询翻译、追问改写，然后把检索查询交给 `HybridRetriever`。
+4. 可视化链路中，`VisualizationAgent` 会复用 `HybridRetriever`，再串联 `DataExtractor` 和 `ChartGenerator` 生成图表与分析文本。
+5. `HybridRetriever` 内部先做 `QueryParser` 解析，再分别走 `BM25Retriever` 和 `ChromaRetriever`，最后做 RRF 融合、元数据加权和现金流表相邻 chunk 扩展。
+6. 问答结果会返回答案与引用；可视化结果会返回图表 HTML / JSON、分析文本与引用。
 
 ```
 用户问题
@@ -70,9 +73,9 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
     ↓
 [RRF Fusion] → 合并去重 → 规则重排序
     ↓
-[Answer Generator] → LLM 生成答案
+[Answer Generator / VisualizationAgent]
     ↓
-[Streamlit UI] → 展示答案 + 引用 + 调试信息
+[Streamlit UI / FastAPI] → 展示答案、图表、引用、调试信息
 ```
 
 ### 技术栈
@@ -85,6 +88,7 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 | **结果融合** | RRF | Reciprocal Rank Fusion |
 | **LLM** | DeepSeek API / Ollama | 支持云端和本地模型 |
 | **前端** | Streamlit | 快速构建交互界面 |
+| **可视化** | Plotly | 交互式图表生成 |
 | **容器化** | Docker + docker-compose | 一键部署 |
 
 ### 核心模块
@@ -105,6 +109,11 @@ Fin-Agent 是一个专门用于分析 Apple Inc. 10-K 财报的智能问答系�
 4. **Generate Layer（生成层）**
    - Prompt Engineering：约束模型基于证据回答
    - 引用生成：标注每个事实的来源
+
+5. **Visualization Layer（可视化层）**
+   - VisualizationAgent：组织检索、抽数、绘图和结果封装
+   - DataExtractor：用 LLM Function Calling 提取结构化财报数据
+   - ChartGenerator：生成 Plotly 图表 HTML / JSON
 
 > 📖 **详细架构文档**：查看 [ARCHITECTURE.md](ARCHITECTURE.md) 了解完整的系统架构、模块设计、数据流和实现细节。
 
@@ -172,7 +181,7 @@ streamlit run ui/streamlit_app.py
 ./venv/bin/python -m app.api.main
 
 # 终端 2：启动 Streamlit UI
-./venv/bin/python streamlit run ui/streamlit_app.py
+./venv/bin/streamlit run ui/streamlit_app.py
 ```
 
 ### 本地检索调试 CLI
@@ -216,6 +225,30 @@ streamlit run ui/streamlit_app.py
 - `--no-translate --no-llm` 用于切回纯本地排障模式。
 - 脚本会优先复用当前环境里的 `http_proxy` / `https_proxy`，并避免 `all_proxy=socks5://...` 导致的初始化报错。
 
+### 本地可视化调试 CLI
+
+```bash
+# Default: generate visualization and save HTML to test_output/debug_visualization.html
+./venv/bin/python scripts/debug_visualize.py "显示苹果 2023 到 2025 年营收趋势"
+
+# Force a bar chart and export to a custom file
+./venv/bin/python scripts/debug_visualize.py \
+  "显示苹果 2023 到 2025 年营收趋势" \
+  --chart-type bar \
+  --output-html test_output/revenue_bar.html
+
+# Limit retrieval to a specific year
+./venv/bin/python scripts/debug_visualize.py \
+  "显示苹果 2024 年营收结构" \
+  --year 2024 \
+  --json
+```
+
+说明：
+- 该脚本会直接调用 `VisualizationAgent`，并把图表保存为本地 HTML。
+- 真实抽数依赖 `DEEPSEEK_API_KEY`；如果缺少 API Key 或索引不可用，脚本会直接报错。
+- 如果你只是想确认脚本参数，先运行 `./venv/bin/python scripts/debug_visualize.py --help`。
+
 ### RAG 评估
 
 ```bash
@@ -256,6 +289,24 @@ curl -X POST "http://127.0.0.1:8000/query" \
 - `max_results` 对应检索条数，和 `scripts/debug_answer.py` 里的 `--top-k` 含义一致。
 - 如果要和 CLI 做结果对比，建议使用同一个问题，例如 `Apple's cash flow 2025`。
 - `/query` 会在响应中返回 `session_id` 和最近 10 轮 `conversation_history`，后续多轮追问时复用同一个 `session_id` 即可。
+
+### 可视化 API curl 调用
+
+```bash
+curl -X POST "http://127.0.0.1:8000/visualize" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "显示苹果 2023 到 2025 年营收趋势",
+    "chart_type": "auto",
+    "engine": "plotly",
+    "max_results": 5
+  }'
+```
+
+说明：
+- `/visualize` 返回 `chart_html`、`chart_json`、`chart_data`、`analysis`、`citations` 和 `chart_type`。
+- 当前仅支持 `plotly` 引擎。
+- 如果返回 `404`，通常表示没有检索到足够的可视化数据；如果返回 `500`，优先检查 `DEEPSEEK_API_KEY`。
 
 ### 表格类问题排障策略
 
@@ -336,9 +387,11 @@ A: 结论：2025财年的总净销售额为4161.61亿美元。
 ### UI 功能
 
 - **多轮对话**：支持上下文连续提问，自动保留最近 10 轮对话历史
+- **模式切换**：侧边栏支持“问答 / 可视化”两种模式
 - **Top K 设置**：调整检索结果数量（3-10）
 - **年份过滤**：限定查询特定年份数据
-- **混合检索开关**：选择是否启用 BM25 + 向量融合
+- **图表类型选择**：可视化模式下支持 `auto / line / bar / grouped_bar / pie`
+- **图表渲染**：可视化模式会直接在对话区嵌入 Plotly HTML 图表
 - **调试信息**：查看检索过程和评分详情
 
 ---
@@ -350,6 +403,7 @@ A: 结论：2025财年的总净销售额为4161.61亿美元。
 fin-agent/
 ├── app/
 │   ├── api/                # FastAPI 路由（可选）
+│   ├── agents/             # 多智能体模块
 │   ├── core/               # 配置管理
 │   ├── ingest/             # 数据解析和分块
 │   │   ├── parser.py       # JSON 解析
@@ -360,20 +414,23 @@ fin-agent/
 │   │   └── hybrid_retriever.py
 │   ├── generate/           # 生成层
 │   │   └── answer_generator.py
+│   ├── tools/              # 可视化工具（抽数、绘图）
+│   ├── ui/                 # UI/CLI 共享工作流
 │   └── schemas/            # 数据模型
 ├── data/
 │   ├── raw/                # 原始数据
 │   │   └── aapl_10k.json
-│   └── processed/          # 处理后的数据
-│       └── chunks.json
+│   ├── processed/          # 处理后的中间产物
+│   ├── bm25_index/         # BM25 索引
+│   └── chroma_db/          # ChromaDB 持久化目录
 ├── ui/
 │   └── streamlit_app.py    # Streamlit 界面
 ├── scripts/
 │   ├── setup.py            # 初始化脚本
-│   └── build_index.py      # 构建索引
-├── indexes/                # 搜索索引
-│   ├── bm25_index/
-│   └── chroma/
+│   ├── build_index.py      # 构建索引
+│   ├── debug_retrieve.py   # 检索调试
+│   ├── debug_answer.py     # 问答调试
+│   └── debug_visualize.py  # 可视化调试
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
@@ -492,7 +549,10 @@ CONVERSATION_WINDOW_SIZE=10
 A: 尝试调整 Top K 参数，或关闭混合检索只使用 BM25（适合精确查询）
 
 **Q: LLM 回答包含错误信息？**
-A: 检查上下文是否相关，可以调整 Prompt 模板（见 `app/generate/prompter.py`）
+A: 先检查检索结果是否相关，再查看 `app/generate/answer_generator.py` 中的 Prompt 模板和调试信息。
+
+**Q: 为什么问答能跑，但可视化失败？**
+A: 可视化链路依赖 `VisualizationAgent -> DataExtractor -> ChartGenerator`，其中 `DataExtractor` 当前默认使用 DeepSeek Function Calling。优先检查 `DEEPSEEK_API_KEY`、索引是否已构建，以及问题里是否包含足够明确的数值型需求。
 
 **Q: Docker 构建很慢？**
 A: 第一次构建需要下载 embedding 模型，后续启动会快很多
@@ -520,8 +580,12 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 - [x] 支持中文问题
 - [ ] **Deepresearch 深度研究**
   - 数据分析：自动提取多年度关键指标，完成同比、环比和趋势分析
-  - 数据图生成：自动生成营收、利润、现金流等可视化图表
+  - 数据图生成：自动生成更丰富的营收、利润、现金流等可视化图表
 - [x] 多轮对话功能 ✅
+- [x] 财报可视化 MVP ✅
+  - Streamlit 可视化模式
+  - `/visualize` API
+  - `debug_visualize.py` CLI
 - [x] 增加 AI 交互Skills: 解释代码库、辅助setup ✅
 
 ### Agentic RAG 扩展
@@ -556,6 +620,14 @@ A: 第一次构建需要下载 embedding 模型，后续启动会快很多
 ## 🕘 版本历史
 
 > 当前仓库尚未维护正式 Git Tag，以下版本按功能里程碑整理。
+
+### 1.1.0 - 2026/04/08
+
+- 【可视化】新增 `VisualizationAgent`，打通检索、抽数、绘图完整链路
+- 【API】新增 `/visualize` 端点，返回图表 HTML / JSON、分析文本与引用
+- 【交互】Streamlit 增加“问答 / 可视化”模式切换，并直接渲染 Plotly 图表
+- 【调试】新增 `scripts/debug_visualize.py`，支持 CLI 导出图表 HTML
+- 【测试】补充可视化 agent、API、UI workflow 与 CLI 相关测试
 
 ### 1.0.2 - 2026/04/01
 

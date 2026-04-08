@@ -68,3 +68,17 @@ htmlcov/
 # Embedded repos
 .claude/skills/superpowers
 .codex/skills/superpowers
+
+# Local agent tooling and planning files
+.agent/
+.claude/
+task_plan.md
+findings.md
+progress.md
+
+# Local environment and generated outputs
+.env
+data/bm25_index/
+data/chroma_db/
+test_output/
+RAG-Agent处理流程.flowchart.md
